@@ -60,14 +60,21 @@ def read_excel_bytes(file_bytes: bytes, sheet_name=None) -> pd.DataFrame:
 
 # ABC por contribución acumulada
 
-def safe_col(df: pd.DataFrame, name: str):
-    """Busca una columna tolerando espacios y mayúsculas/minúsculas."""
-    if name in df.columns:
-        return df[name]
+def safe_col(df: pd.DataFrame, name: str, alt_names=None):
+    """Busca una columna tolerando espacios, mayúsculas/minúsculas o nombres alternativos."""
+    if alt_names is None:
+        alt_names = []
+    # Diccionario para búsqueda insensible a mayúsculas/minúsculas y espacios
     alt = {c.strip().lower(): c for c in df.columns}
     key = name.strip().lower()
+    # Revisar nombre principal
     if key in alt:
         return df[alt[key]]
+    # Revisar nombres alternativos
+    for alt_name in alt_names:
+        k = alt_name.strip().lower()
+        if k in alt:
+            return df[alt[k]]
     raise KeyError(f"No se encontró la columna requerida: {name}")
 
 
@@ -126,6 +133,46 @@ def week_floor(dt: pd.Series) -> pd.Series:
 st.set_page_config(page_title='Súper ABC & Perfiles', layout='wide')
 st.title('📦 Súper ABC Interactivo & Perfiles de Órdenes')
 
+st.markdown("""
+Bienvenido a la aplicación **Súper ABC & Perfiles** 🚀  
+
+Esta herramienta permite analizar los productos de tu portafolio mediante una clasificación **Súper ABC**, combinando dos criterios (ej. ventas y cubicaje).  
+El flujo de uso es el siguiente:
+
+1. **Carga de archivo**: Sube un archivo Excel/CSV con la información de tus productos (ventas, cubicaje, pedidos, etc.).  
+2. **Definición de cortes**: Elige los porcentajes que delimitan las categorías A, B y C según tu criterio.  
+3. **Clasificación Súper ABC**: Los productos se clasifican automáticamente en las categorías combinadas **AA..CC**.  
+4. **Resumen por categoría**: Se muestra una tabla con:
+   - Cantidad de ítems por clase  
+   - Zona de bodega y política de inventario sugerida  
+   - Fill Rate objetivo  
+   - **IRA (Índice de Rotación Aceptable)** según la clase  
+   - Ventas y porcentaje de participación  
+5. **Perfiles adicionales**: Podrás ver indicadores sobre líneas por orden, cubicaje por orden, días de inventario y tablas cruzadas.  
+6. **Exportación**: Toda la información puede descargarse en un PDF o CSV para reportes.  
+
+ℹ️ Esta aplicación está pensada como apoyo para decisiones de **gestión de inventario y almacenamiento**, facilitando el análisis ABC tradicional y extendido.
+""")
+
+# -------------------------------
+# Advertencia sobre formato del Excel
+# -------------------------------
+st.info("""
+📂 **Configuración del archivo Excel requerida:**
+
+El archivo debe contener **exactamente** las siguientes columnas (respetando los nombres, aunque la aplicación es tolerante a espacios y mayúsculas/minúsculas):
+
+- `Artículo` → Identificador único del producto  
+- `Unid. Vend` → Cantidad de unidades vendidas  
+- `Monto venta` → Monto total de venta  
+- `Volumen total (p3) o Volumen total (m3)` → Volumen total del producto. Puede estar en **pies³** o **metros³**. La unidad se selecciona en el panel lateral y se convertirá automáticamente para los cálculos internos.  
+- `Num. Doc` → Número de documento / pedido  
+- `Fecha Doc` → Fecha del documento/pedido en formato DD/MM/AAAA. 
+
+⚠️ **Importante:** Si alguna columna no existe o tiene un nombre diferente, la aplicación no podrá procesar los datos correctamente.  
+Asegúrate de seleccionar la unidad correcta en la barra lateral para que los cálculos de volumen sean consistentes.
+""")
+
 with st.sidebar:
     st.header('1) Cargar datos')
     uploaded_file = st.file_uploader('Excel de ventas/ordenes', type=['xlsx','xls'])
@@ -149,6 +196,11 @@ with st.sidebar:
     A_cut_2 = st.slider(f'A (criterio {crit2})', 50, 95, 80) / 100.0
     B_cut_2 = st.slider(f'B (criterio {crit2})', int(A_cut_2*100)+1, 99, 95) / 100.0
 
+    st.session_state['A_cut_1'] = A_cut_1
+    st.session_state['B_cut_1'] = B_cut_1
+    st.session_state['A_cut_2'] = A_cut_2
+    st.session_state['B_cut_2'] = B_cut_2
+
     st.header('4) Exportar')
     want_csv = st.checkbox('Permitir descarga CSV', True)
     gen_pdf = st.checkbox('Generar informe PDF (requiere reportlab & matplotlib)', False)
@@ -171,7 +223,7 @@ try:
     art = safe_col(df, 'Artículo').astype(str)
     unid = pd.to_numeric(safe_col(df, 'Unid. Vend'), errors='coerce').fillna(0)
     monto = pd.to_numeric(safe_col(df, 'Monto venta'), errors='coerce').fillna(0)
-    vol = pd.to_numeric(safe_col(df, 'Volumen total (p3)'), errors='coerce').fillna(0) * vol_factor
+    vol = pd.to_numeric(safe_col(df, 'Volumen total (p3)', alt_names=['Volumen total (m3)', 'Volumen total']), errors='coerce').fillna(0) * vol_factor
     numdoc = safe_col(df, 'Num. Doc').astype(str)
     fecha = pd.to_datetime(safe_col(df, 'Fecha Doc'), errors='coerce')
 except Exception as e:
@@ -242,6 +294,20 @@ if st.button('1) Calcular Súper ABC'):
 # -------------------------------
 # Mostrar resumen y perfiles
 # -------------------------------
+def ira_by_class(clase: str) -> str:
+    mapping = {
+        'AA': '> 95%',
+        'AB': '94% - 95%',
+        'AC': '92% - 94%',
+        'BA': '90% - 92%',
+        'BB': '88% - 90%',
+        'BC': '86% - 88%',
+        'CA': '84% - 86%',
+        'CB': '82% - 84%',
+        'CC': '< 80%'
+    }
+    return mapping.get(clase, 'N/A')
+
 if 'by_item' in st.session_state:
     by_item = st.session_state['by_item']
 
@@ -252,15 +318,27 @@ if 'by_item' in st.session_state:
             Zona_Bodega=('Zona_Bodega','first'),
             Politica=('Política_Inv','first'),
             FillRate=('FillRate_obj','first'),
-            Frecuencia_Recuento=('Frecuencia_Recuento','first'),
-            Ventas=('ventas','sum')
+            Ventas=('ventas','sum'),
+            Frecuencia_Recuento=('Frecuencia_Recuento','first')
         ).reset_index()
+
+        # Insertar columna IRA después de FillRate
+        summary['IRA'] = summary['Clase_SuperABC'].apply(ira_by_class)
+
         summary['Porcentaje'] = (summary['Cantidad']/summary['Cantidad'].sum()*100).round(2)
         total_sales = summary['Ventas'].sum()
         summary['% Ventas'] = (100 * summary['Ventas'] / (total_sales if total_sales>0 else 1)).round(2)
+
+        # Ordenar categorías
         order = [a+b for a in 'ABC' for b in 'ABC']
         summary['_ord'] = summary['Clase_SuperABC'].apply(lambda x: order.index(x) if x in order else 999)
         summary = summary.sort_values('_ord').drop(columns=['_ord'])
+
+        # Reordenar columnas para que IRA quede después de FillRate
+        cols = ['Clase_SuperABC','Cantidad','Zona_Bodega','Politica','FillRate','IRA',
+                'Frecuencia_Recuento','Ventas','Porcentaje','% Ventas']
+        summary = summary[cols]
+
         st.dataframe(summary)
 
         # Perfil: lineas por orden (distribucion %)
@@ -449,6 +527,30 @@ if gen_pdf:
             elems.append(Spacer(1, 14))
 
             # -------------------------------
+            # Texto explicativo inicial
+            # -------------------------------
+            intro_text = """
+            <b>Clasificación de zonas de bodega:</b><br/>
+            - <b>Zona Oro (Close to door, close to floor):</b> Área de mayor valor, ubicada estratégicamente cerca de las puertas de entrada y salida de la bodega. Se destina a los productos de <b>alta rotación</b>, minimizando tiempo de viaje y esfuerzo de los operarios.<br/>
+            - <b>Zona Plata (Close to floor):</b> Ubicada a una distancia media de las puertas. Se utiliza para productos de <b>rotación media</b>. El tiempo de acceso es moderado.<br/>
+            - <b>Zona Bronce (Far from door, far from floor):</b> Área más alejada de las puertas. Reservada para productos de <b>baja rotación</b>. Aunque implica mayor tiempo de acceso, la baja frecuencia de movimiento lo justifica.<br/><br/>
+
+            <b>Políticas de inventario:</b><br/>
+            - <b>ROP-OUL:</b> Reordenar al alcanzar el punto de pedido (ROP), con un límite superior (OUL) para evitar exceso de inventario.<br/>
+            - <b>RTP-EOQ:</b> Política de revisión periódica (RTP), aplicando el tamaño de lote económico (EOQ) como cantidad óptima de pedido.<br/>
+            - <b>ROP-EOQ:</b> Política de reorden continuo (ROP), usando el EOQ como lote de reposición.<br/><br/>
+
+            <b>Fill rate:</b> Métrica de nivel de servicio que mide el porcentaje de demanda atendida en el primer intento con el inventario disponible. Un fill rate alto indica capacidad de satisfacer pedidos sin generar faltantes.<br/><br/>
+
+            <b>IRA (Inventory Record Accuracy):</b> KPI que mide la exactitud del inventario, comparando los registros teóricos del sistema con la realidad física del stock disponible en un almacén. Un IRA alto indica que la información del sistema es confiable, lo que permite una gestión de inventarios más eficiente, reduciendo pérdidas, excedentes y retrasos en los pedidos.  <br/><br/>
+
+            <b>Recuento cíclico:</b> Estrategia de control de inventarios que consiste en revisar y contar de forma periódica subgrupos de productos a lo largo del año. Se enfoca más en artículos críticos o de mayor rotación (categoría A o AA), garantizando precisión de inventario sin necesidad de inventarios generales completos.
+            """
+
+            elems.append(Paragraph(intro_text, styles['Normal']))
+            elems.append(Spacer(1, 14))
+
+            # -------------------------------
             # Datos generales
             # -------------------------------
             file_name = st.session_state.get('file_name', uploaded_file.name if uploaded_file else 'Archivo no registrado')
@@ -456,6 +558,10 @@ if gen_pdf:
             vol_units = st.session_state.get('vol_units', unit_vol)
             crit1 = st.session_state.get('crit1_name', crit1)
             crit2 = st.session_state.get('crit2_name', crit2)
+            A_cut_1 = st.session_state['A_cut_1']
+            B_cut_1 = st.session_state['B_cut_1']
+            A_cut_2 = st.session_state['A_cut_2']
+            B_cut_2 = st.session_state['B_cut_2']
 
             general_info = f"""
             <b>Documento leído:</b> {file_name}<br/>
@@ -463,6 +569,10 @@ if gen_pdf:
             <b>Unidades de volumen:</b> {vol_units}<br/>
             <b>Criterio principal:</b> {crit1}<br/>
             <b>Criterio secundario:</b> {crit2}<br/>
+            <b>Corte A ({st.session_state['crit1_name']}):</b> {A_cut_1*100:.1f}%<br/>
+            <b>Corte B ({st.session_state['crit1_name']}):</b> {B_cut_1*100:.1f}%<br/>
+            <b>Corte A ({st.session_state['crit2_name']}):</b> {A_cut_2*100:.1f}%<br/>
+            <b>Corte B ({st.session_state['crit2_name']}):</b> {B_cut_2*100:.1f}%<br/>
             """
             elems.append(Paragraph(general_info, styles['Normal']))
             elems.append(Spacer(1, 12))
@@ -487,11 +597,31 @@ if gen_pdf:
             summary_table['% Ventas'] = (100 * summary_table['Ventas'] / (total_sales if total_sales>0 else 1)).round(2)
             summary_table['Ventas'] = summary_table['Ventas'].round(2)
 
+            # 👉 Definir IRA según categoría
+            ira_map = {
+                'AA': '> 95%',
+                'AB': '94% - 95%',
+                'AC': '92% - 94%',
+                'BA': '90% - 92%',
+                'BB': '88% - 90%',
+                'BC': '86% - 88%',
+                'CA': '84% - 86%',
+                'CB': '82% - 84%',
+                'CC': '< 80%'
+            }
+            summary_table['IRA'] = summary_table['Clase_SuperABC'].map(ira_map)
+
+            # Reordenar columnas para poner IRA después de FillRate
+            cols = list(summary_table.columns)
+            insert_pos = cols.index('FillRate') + 1
+            cols = cols[:insert_pos] + ['IRA'] + cols[insert_pos:-1]  # dejamos % Ventas al final
+            summary_table = summary_table[cols]
+
             # preparar datos y anchos
             data = [list(summary_table.columns)] + summary_table.round(2).astype(str).values.tolist()
             col_widths = []
             for col in summary_table.columns:
-                if col in ['Cantidad','Zona_Bodega','FillRate']:
+                if col in ['Cantidad','Zona_Bodega','FillRate','IRA']:
                     col_widths.append(45)
                 elif col in ['Ventas','Porcentaje','% Ventas']:
                     col_widths.append(50)
@@ -509,7 +639,7 @@ if gen_pdf:
             ]))
             elems.append(Paragraph('📑 Resumen por categoría (AA..CC)', styles['Heading2']))
             elems.append(t)
-            elems.append(Spacer(1, 12))
+            elems.append(PageBreak())
 
             # -------------------------------
             # Función auxiliar para añadir figuras
@@ -522,10 +652,11 @@ if gen_pdf:
                 img_buf.seek(0)
                 elems.append(Paragraph(title, styles['Heading3']))
                 elems.append(Image(img_buf, width=width, height=height))
-                elems.append(Spacer(1, 10))
+                elems.append(Spacer(1, 12))
             # -------------------------------
             # Gráfica Pareto
             # -------------------------------
+
             pareto = by_item.sort_values('popularidad', ascending=False).copy()
             pareto['cum_picks'] = pareto['popularidad'].cumsum()
             total_picks = pareto['popularidad'].sum()
@@ -535,8 +666,17 @@ if gen_pdf:
             ax1.plot(pareto['pct_sku'], pareto['cum_pct_picks'], marker='o')
             ax1.set_xlabel('% SKU (acumulado)')
             ax1.set_ylabel('% picks (acumulado)')
-            ax1.set_title('Pareto de popularidad')
+            ax1.set_title('Distribución de popularidad')
             add_fig(fig1, 'Pareto de popularidad')
+                        
+            pareto_intro = """
+            Este perfil muestra qué porcentaje acumulado de los movimientos de picking corresponde a qué porcentaje acumulado de SKUs según el principio de Pareto (muchos triviales, pocos vitales). 
+            Permite identificar los productos que concentran la mayor parte de la actividad y que deben recibir prioridad en la bodega.
+            """
+            elems.append(Paragraph(pareto_intro, styles['Normal']))
+            elems.append(Spacer(1, 6))
+
+            elems.append(PageBreak())
 
             # -------------------------------
             # Líneas por orden
@@ -551,10 +691,19 @@ if gen_pdf:
             ax2.set_ylabel('% de órdenes')
             ax2.set_title('Distribución de líneas por orden')
             add_fig(fig2, 'Líneas por orden')
+            
+            lines_intro = """
+            Este perfil muestra cuántas líneas (SKUs distintos) tiene cada pedido y qué porcentaje de órdenes corresponde a cada cantidad de líneas. 
+            Permite evaluar la complejidad de los pedidos y planificar recursos de picking y personal.
+            """
+            elems.append(Paragraph(lines_intro, styles['Normal']))
+            elems.append(Spacer(1, 6))
+            elems.append(PageBreak())
 
             # -------------------------------
             # Cubicaje por orden
             # -------------------------------
+
             cubic_per_order = base.groupby('NumDoc').agg(volumen_total=('Volumen_p3','sum')).reset_index()
             vol_bins = [-1,1,2,5,10,20,50,1e9]
             vol_labels = ['≤1','1-2','2-5','5-10','10-20','20-50','>50']
@@ -569,9 +718,18 @@ if gen_pdf:
             ax3.set_title('Distribución de volumen por orden')
             add_fig(fig3, 'Volumen por orden')
 
+            cubic_intro = """
+            El presente perfil ilustra mediante una gráfica el rango de volumen total de los pedidos y su porcentaje sobre el total de órdenes. 
+            Es útil para dimensionar espacio de almacenamiento, cajas, pallets y vehículos de transporte, según requerimientos de espacio y rotación.
+            """
+            elems.append(Paragraph(cubic_intro, styles['Normal']))
+            elems.append(Spacer(1, 6))
+            elems.append(PageBreak())
+
             # -------------------------------
             # Distribución por día de la semana
             # -------------------------------
+
             orders_dates = base.groupby('NumDoc').agg(fecha=('Fecha','max')).reset_index()
             orders_dates['dia'] = orders_dates['fecha'].dt.day_name()
             mapping_days = {'Monday':'Lunes','Tuesday':'Martes','Wednesday':'Miércoles','Thursday':'Jueves',
@@ -587,8 +745,16 @@ if gen_pdf:
             ax4.set_title('Distribución de órdenes por día de la semana')
             add_fig(fig4, 'Órdenes por día de la semana')
 
+            days_intro = """
+            Este muestra cómo se distribuyen los pedidos a lo largo de la semana y su porcentaje sobre el total. 
+            Permite planificar personal, turnos y recursos logísticos en función de los picos y valles de demanda, identificando qué días presentan mayor ingreso de órdenes.
+            """
+            elems.append(Paragraph(days_intro, styles['Normal']))
+            elems.append(PageBreak())
+
             # Tabla cruzada líneas x volumen con % pedidos, Totales y Total Línea
             # -------------------------------
+
             lv = base.groupby('NumDoc').agg(
                 lineas=('Articulo','nunique'),
                 volumen_total=('Volumen_p3','sum')
@@ -674,7 +840,14 @@ if gen_pdf:
                 ('ALIGN',(0,0),(-1,-1),'CENTER'),
                 ('VALIGN',(0,0),(-1,-1),'MIDDLE')
             ]))
-            elems.append(Paragraph('📊 Tabla cruzada: líneas por orden vs volumen', styles['Heading2']))
+            elems.append(Paragraph('Tabla cruzada: líneas por orden vs volumen', styles['Heading2']))
+            cross_intro = """
+            Permite ver cuántos pedidos combinan cierta cantidad de líneas con un rango de volumen determinado, 
+            junto con totales, porcentaje de pedidos y porcentaje de volumen por línea. 
+            Esto ayuda a identificar combinaciones de pedidos frecuentes o críticas y optimizar la disposición de la bodega y flujos de picking.
+            """
+            elems.append(Paragraph(cross_intro, styles['Normal']))
+            elems.append(Spacer(1, 6))
             elems.append(t_cross)
             elems.append(Spacer(1, 10))
 
@@ -686,8 +859,8 @@ if gen_pdf:
             buffer.seek(0)
             st.download_button(
                 '📄 Descargar Informe PDF',
-                data=buffer,
-                file_name=sanitize_filename('informe_super_abc_completo.pdf'),
+                data=buffer.getvalue(),
+                file_name='informe_super_abc_completo.pdf',
                 mime='application/pdf'
             )
 
