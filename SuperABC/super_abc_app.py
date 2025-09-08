@@ -146,7 +146,7 @@ El flujo de uso es el siguiente:
    - Cantidad de ítems por clase  
    - Zona de bodega y política de inventario sugerida  
    - Fill Rate objetivo  
-   - **IRA (Índice de Rotación Aceptable)** según la clase  
+   - **IRA (Inventory Record Accuracy)** según la clase  
    - Ventas y porcentaje de participación  
 5. **Perfiles adicionales**: Podrás ver indicadores sobre líneas por orden, cubicaje por orden, días de inventario y tablas cruzadas.  
 6. **Exportación**: Toda la información puede descargarse en un PDF o CSV para reportes.  
@@ -478,9 +478,17 @@ if 'by_item' in st.session_state:
             if 'FillRate_obj' in export_df.columns:
                 export_df['FillRate_obj'] = export_df['FillRate_obj'].astype(str).str.replace('–','-', regex=False).str.replace('—','-', regex=False)
             export_df = sanitize_colnames(export_df)
-            fname = f"super_abc_results_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            st.download_button('📥 Descargar CSV (sanitizado)', data=export_df.to_csv(index=False).encode('utf-8'), file_name=sanitize_filename(fname), mime='text/csv')
 
+            # Generar nombre de archivo y mantener extensión .csv
+            raw_name = f"super_abc_results_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}"
+            fname = sanitize_filename(raw_name) + ".csv"
+
+            st.download_button(
+                '📥 Descargar CSV (sanitizado)',
+                data=export_df.to_csv(index=False).encode('utf-8'),
+                file_name=fname,
+                mime='text/csv'
+            )
 # -------------------------------
 # Generar PDF completo robusto y profesional (mejorado)
 # -------------------------------
@@ -865,3 +873,4 @@ if gen_pdf:
             )
 
 st.success('Listo. Ajusta cortes y vuelve a calcular según necesites.')
+
