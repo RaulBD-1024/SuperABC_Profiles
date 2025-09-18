@@ -1952,66 +1952,69 @@ with st.expander("📊 Descargar Resultados Completos", expanded=False):
                     file_name="perfiles_distribuciones.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+        else:
+            st.info("No hay perfiles generados para descargar. Marca la opción 'Generar Excel' y vuelve a calcular.")
     with col2:
         st.subheader("🏗️ Distribución de Bodega")
-        if st.button("📥 Exportar análisis de bodega", key="download_warehouse"):
-            if 'analisis_categorias' in st.session_state:
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                    # Hoja Análisis por SKU
-                    st.session_state['analisis_categorias'].to_excel(writer, sheet_name='Analisis_SKU', index=True)
+        if st.session_state.get('want_csv', True):
+            if st.button("📥 Exportar análisis de bodega", key="download_warehouse"):
+                if 'analisis_categorias' in st.session_state:
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                        # Hoja Análisis por SKU
+                        st.session_state['analisis_categorias'].to_excel(writer, sheet_name='Analisis_SKU', index=True)
+                        
+                        # Hoja Cálculos de Capacidad
+                        if 'calculos_capacidad' in st.session_state:
+                            st.session_state['calculos_capacidad'].to_excel(writer, sheet_name='Calculos_Capacidad', index=True)
                     
-                    # Hoja Cálculos de Capacidad
-                    if 'calculos_capacidad' in st.session_state:
-                        st.session_state['calculos_capacidad'].to_excel(writer, sheet_name='Calculos_Capacidad', index=True)
-                
-                    # Hoja Racks por Categoría
-                    if 'racks_categorias' in st.session_state:
-                        st.session_state['racks_categorias'].to_excel(writer, sheet_name='Distribucion_Racks', index=True)
-                    
-                    # Hoja Resumen de Distribución
-                    if 'resumen_distribucion' in st.session_state:
-                        st.session_state['resumen_distribucion'].to_excel(writer, sheet_name='Resumen_Distribucion', index=False)
+                        # Hoja Racks por Categoría
+                        if 'racks_categorias' in st.session_state:
+                            st.session_state['racks_categorias'].to_excel(writer, sheet_name='Distribucion_Racks', index=True)
+                        
+                        # Hoja Resumen de Distribución
+                        if 'resumen_distribucion' in st.session_state:
+                            st.session_state['resumen_distribucion'].to_excel(writer, sheet_name='Resumen_Distribucion', index=False)
 
 
-                from openpyxl import load_workbook
-                # 🔹 Cargar el libro desde el mismo buffer
-                buffer.seek(0)
-                wb = load_workbook(buffer)
+                    from openpyxl import load_workbook
+                    # 🔹 Cargar el libro desde el mismo buffer
+                    buffer.seek(0)
+                    wb = load_workbook(buffer)
 
-                from openpyxl.chart import PieChart, Reference
-                from openpyxl.chart.label import DataLabelList
+                    from openpyxl.chart import PieChart, Reference
+                    from openpyxl.chart.label import DataLabelList
 
 
-                # 🔹 Insertar gráfico en hoja Distribucion_Racks
-                if 'Distribucion_Racks' in wb.sheetnames:
-                    ws2 = wb['Distribucion_Racks']
-                    chart2 = PieChart()
-                    labels2 = Reference(ws2, min_col=1, min_row=2, max_row=ws2.max_row)  # categorías
-                    data2 = Reference(ws2, min_col=7, min_row=1, max_row=ws2.max_row)    # columna con % racks
-                    chart2.add_data(data2, titles_from_data=True)
-                    chart2.set_categories(labels2)
-                    chart2.title = "Distribución de Racks por Categoría"
-                    chart2.dataLabels = DataLabelList()
-                    chart2.dataLabels.showVal = True      # Muestra valores
-                    chart2.dataLabels.showPercent = True  # (opcional) muestra % en vez de valores
-                    chart2.dataLabels.showCatName = True  # (opcional) muestra nombre de categoría
-                    ws2.add_chart(chart2, "H5")  # posición del gráfico
+                    # 🔹 Insertar gráfico en hoja Distribucion_Racks
+                    if 'Distribucion_Racks' in wb.sheetnames:
+                        ws2 = wb['Distribucion_Racks']
+                        chart2 = PieChart()
+                        labels2 = Reference(ws2, min_col=1, min_row=2, max_row=ws2.max_row)  # categorías
+                        data2 = Reference(ws2, min_col=7, min_row=1, max_row=ws2.max_row)    # columna con % racks
+                        chart2.add_data(data2, titles_from_data=True)
+                        chart2.set_categories(labels2)
+                        chart2.title = "Distribución de Racks por Categoría"
+                        chart2.dataLabels = DataLabelList()
+                        chart2.dataLabels.showVal = True      # Muestra valores
+                        chart2.dataLabels.showPercent = True  # (opcional) muestra % en vez de valores
+                        chart2.dataLabels.showCatName = True  # (opcional) muestra nombre de categoría
+                        ws2.add_chart(chart2, "H5")  # posición del gráfico
 
-                # 🔹 Guardar de nuevo en buffer
-                new_buffer = io.BytesIO()
-                wb.save(new_buffer)
-                new_buffer.seek(0)
+                    # 🔹 Guardar de nuevo en buffer
+                    new_buffer = io.BytesIO()
+                    wb.save(new_buffer)
+                    new_buffer.seek(0)
 
-                st.download_button(
-                    "📥 Descargar Excel de Bodega",
-                    data=new_buffer.getvalue(),
-                    file_name='distribucion_bodega.xlsx',
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                    st.download_button(
+                        "📥 Descargar Excel de Bodega",
+                        data=new_buffer.getvalue(),
+                        file_name='distribucion_bodega.xlsx',
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
-            else:
-                st.warning("Primero debes calcular la distribución de bodega")
+                else:
+                    st.warning("Primero debes calcular la distribución de bodega")
 
 with st.expander("📄 Reportes PDF", expanded=False):
     # -------------------------------
