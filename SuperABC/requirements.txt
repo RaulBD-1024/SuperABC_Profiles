@@ -3,8 +3,6 @@ numpy==2.3.2
 pandas==2.3.2
 scikit-learn==1.7.2
 statsmodels==0.14.5
-pmdarima==1.8.5
-prophet==1.1.7
 cmdstanpy==1.2.5
 stanio==0.5.1
 scipy==1.16.1
@@ -92,4 +90,5 @@ zope.event==6.0
 zope.interface==8.0.1
 importlib_resources==6.5.2
 tenacity==9.1.2
+
 
