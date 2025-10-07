@@ -11,16 +11,12 @@ import seaborn as sns
 import plotly.express as px
 import streamlit as st
 
-import statsmodels.api as sm
-from prophet import Prophet
-from prophet.plot import plot_plotly, plot_components_plotly
-
 
 # Para generar PDF/plots
 try:
     import matplotlib.pyplot as plt
     from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
+    from reportlab.platypus import Paragraph, Spacer, Table
     from reportlab.lib.styles import getSampleStyleSheet
     PDF_LIBS_AVAILABLE = True
 except Exception:
@@ -2732,3 +2728,4 @@ if st.button("Cargar estado previo"):
 
 if st.button("Guardar estado actual"):
     guardar_estado_json()
+
