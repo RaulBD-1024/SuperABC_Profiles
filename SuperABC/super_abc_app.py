@@ -1,20 +1,13 @@
 """
-Inventory Insight App Interactiva
+Inventory Insight App Interactiva - by Raúl Bolaños Díaz - 2025
 =====================================
-
-Versión mejorada:
-- ABC por contribución (el usuario define cortes A/B por criterio)
-- Combinación de dos criterios en AA..CC
-- Resumen extendido (incluye % ventas por categoría)
-- Perfiles solicitados (líneas por orden, cubicaje por orden, días, tabla cruzada)
-- CSV export con nombres sanitizados (sin caracteres especiales)
-- Generación opcional de informe PDF (requiere reportlab + matplotlib)
 """
 
 import io
 import unicodedata
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import plotly.express as px
 import streamlit as st
 
@@ -159,18 +152,38 @@ def generate_super_abc_combinations(by_item: pd.DataFrame, criterios_seleccionad
 
 def map_zone(clase: str) -> str:
     """
-    Mapea una clase de Súper ABC a una zona de bodega.
-    Para múltiples criterios, se basa en la prioridad de las letras A, B, C.
+    Asigna una zona (Oro, Plata, Bronce) considerando:
+    - La letra más importante está al inicio.
+    - Las letras A, B, C tienen pesos 3, 2 y 1 respectivamente.
+    - Se aplica un promedio ponderado según posición.
+    Compatible con clases de 2, 3 o más letras.
     """
-    # Si tiene al menos una A, va a Oro
-    if 'A' in clase:
-        return 'Oro'
-    # Si tiene al menos una B (y no A), va a Plata
-    elif 'B' in clase:
-        return 'Plata'
-    # Si solo tiene C, va a Bronce
+    if not isinstance(clase, str) or clase.strip() == "":
+        return "Bronce"
+
+    clase = clase.strip().upper()
+    pesos_letras = {'A': 3, 'B': 2, 'C': 1}
+
+    # Ponderar más las letras de la izquierda
+    n = len(clase)
+    pesos_posicionales = list(range(n, 0, -1))  # Ej: [3,2,1] para 3 letras
+
+    total = 0
+    total_peso = 0
+    for letra, peso_pos in zip(clase, pesos_posicionales):
+        valor = pesos_letras.get(letra, 1)
+        total += valor * peso_pos
+        total_peso += peso_pos
+
+    promedio_ponderado = total / total_peso
+
+    # Umbrales calibrados con tus datos reales
+    if promedio_ponderado >= 2.45:
+        return "Oro"
+    elif promedio_ponderado >= 2:
+        return "Plata"
     else:
-        return 'Bronce'
+        return "Bronce"
 
 def policy_by_demand(cv: float, intermittency: float) -> str:
     if intermittency >= 0.5:
@@ -207,7 +220,9 @@ st.title('📦 Inventory Insight App')
 st.markdown("""
 Bienvenido a **Inventory Insight App** 🚀  
 
-Esta herramienta integral permite analizar y optimizar la gestión de inventarios mediante una clasificación **Súper ABC** multi-criterio, análisis de distribución de bodega y pronósticos avanzados.  
+Desarrollado por Raúl Bolaños Díaz - 2025
+            
+Esta herramienta integral permite analizar y optimizar la gestión de inventarios mediante una clasificación **Súper ABC** multi-criterio, análisis de distribución de bodega y estudio de demandas.  
 
 ### 🎯 **Funcionalidades Principales:**
 
@@ -229,16 +244,21 @@ Esta herramienta integral permite analizar y optimizar la gestión de inventario
 - Perfiles de cubicaje y carga unitaria
 - Análisis cruzado líneas vs volumen
 
-#### 🔮 **4. Pronósticos y Forecasting**
-- Pronósticos individuales por SKU
-- Pronósticos por categoría ABC
-- Modelos Prophet y estadísticos
-- Análisis de tendencias y estacionalidad
+#### 🔮 **4. Análisis de Demanda**
+- Series históricas individuales por SKU o Familia
+- Estudios de tendencia y estacionalidad
+- Alternativas para series muy cortas o irregulares (tendencia suavizada y ACF [Autocorrelación])
 
 #### 📋 **5. Análisis de Contribución**
 - Contribución por categoría ABC a ventas, volumen y popularidad
 - Visualizaciones comparativas
 - Métricas de impacto por categoría
+            
+### 📦 **Registros y optimización de almacén:**
+- Análisis de ubicaciones actuales vs sugeridas
+- Sugerencias de reubicación basadas en actividad
+- Sistema de registros de movimientos de producto y actualización de ocupación
+- Optimización de espacio y racks
 
 #### 📥 **6. Exportación Completa**
 - Excel con múltiples hojas organizadas
@@ -252,7 +272,7 @@ Esta herramienta integral permite analizar y optimizar la gestión de inventario
 3. **Análisis Súper ABC** → Clasificación automática multi-criterio
 4. **Perfiles de Actividad** → Análisis detallado de patrones
 5. **Distribución de Bodega** → Optimización de espacio y racks
-6. **Pronósticos** → Forecasting avanzado por SKU y categoría
+6. **Demanda** → Análisis de demanda y estacionalidad avanzado por SKU o Familia
 7. **Exportación** → Descarga resultados completos
 
 ℹ️ Esta aplicación está pensada como apoyo para decisiones de **gestión de inventario y almacenamiento**, facilitando el análisis ABC tradicional y extendido.
@@ -266,23 +286,20 @@ st.info("""
 
 El archivo debe contener **exactamente** las siguientes columnas (respetando los nombres, aunque la aplicación es tolerante a espacios y mayúsculas/minúsculas):
 
-- `Artículo` → Identificador único del producto  
+- `Num. Doc` → Número de documento / pedido (factura)
+- `Artículo` → Identificador único del producto 
+- `Familia` → Categoría principal del producto 
 - `Unid. Vend` → Cantidad de unidades vendidas  
 - `Monto venta` → Monto total de venta  
-- `Volumen total (p3) o Volumen total (m3)` → Volumen total del producto. Puede estar en **pies³** o **metros³**. La unidad se selecciona en el panel lateral y se convertirá automáticamente para los cálculos internos.  
-- `Num. Doc` → Número de documento / pedido  
+- `Cajas vend.` → Cantidad de cajas vendidas (requerido para forecasting y sugerencias de distribución de bodega)
+- `Cant x caja.` → Cantidad de unidades por caja (opcional, pero recomendado para análisis de carga unitaria)
+- `Volumen total (p3) o Volumen total (m3)` → Volumen total del producto. Puede estar en **pies³** o **metros³**. La unidad se selecciona en el panel lateral y se convertirá automáticamente para los cálculos internos.   
 - `Fecha Doc` → Fecha del documento/pedido en formato DD/MM/AAAA. 
+- `Num Cliente` → Identificador del cliente (opcional, pero recomendado para análisis de popularidad)
+- `Num País` → Identificador del país (opcional, pero recomendado para análisis de popularidad)
 
 ⚠️ **Importante:** Si alguna columna no existe o tiene un nombre diferente, la aplicación no podrá procesar los datos correctamente.  
 Asegúrate de seleccionar la unidad correcta en la barra lateral para que los cálculos de volumen sean consistentes.
-
-📋 **Ejemplo de estructura del archivo Excel:**
-```
-| Artículo | Unid. Vend | Monto venta | Volumen total (p3) | Num. Doc | Fecha Doc |
-|----------|------------|-------------|-------------------|----------|-----------|
-| PROD001  | 100        | 1500.00     | 2.5               | DOC001   | 15/01/2024|
-| PROD002  | 50         | 750.00      | 1.2               | DOC002   | 16/01/2024|
-```
 """)
 
 with st.sidebar:
@@ -315,7 +332,7 @@ with st.sidebar:
     criterios_seleccionados = st.multiselect(
         'Selecciona los criterios a aplicar (mínimo 2):',
         list(criterios.keys()),
-        default=['Popularidad', 'Ventas'],
+        default=['Rotacion', 'Ventas'],
         help='Puedes seleccionar 2 o más criterios. Se generarán todas las combinaciones posibles.'
     )
     
@@ -443,9 +460,12 @@ try:
     art = df['Artículo_LIMPIO']
     unid = pd.to_numeric(safe_col(df, 'Unid. Vend'), errors='coerce').fillna(0)
     monto = pd.to_numeric(safe_col(df, 'Monto venta'), errors='coerce').fillna(0)
-    vol = pd.to_numeric(safe_col(df, 'Volumen total (p3)', alt_names=['Volumen total (m3)', 'Volumen total']), errors='coerce').fillna(0) * vol_factor
+    vol = pd.to_numeric(safe_col(df, 'Volumen total (m3)', alt_names=['Volumen total (p3)', 'Volumen total']), errors='coerce').fillna(0) # revisar si ocupa vol_factor
     numdoc = safe_col(df, 'Num. Doc').astype(str)
     fecha = pd.to_datetime(safe_col(df, 'Fecha Doc'), errors='coerce')
+    familia = safe_col(df, 'Familia').astype(str).str.strip()
+    num_cliente = safe_col(df, 'Num. Cliente').astype(str)
+    num_pais = safe_col(df, 'Num. País').astype(str)
     # Opcional: Unidades por caja (si existe en el Excel)
     unidades_por_caja_src = pd.to_numeric(
         safe_col(df, 'Cant x Caja', alt_names=['Cant x Caja','Cant. x Caja','Unid x Caja','Unid. x Caja','Unidades por caja','Unid por caja']),
@@ -466,11 +486,14 @@ base = pd.DataFrame({
     'Articulo': art,
     'Unidades': unid,
     'Monto': monto,
-    'Volumen_p3': vol,
+    'Volumen_m3': vol,
     'NumDoc': numdoc,
     'Fecha': fecha,
-    'Cajas_vendidas': pd.to_numeric(safe_col(df, 'Cajas vend.'), errors='coerce').fillna(0),
-    'Unidades_por_caja': unidades_por_caja_src
+    'Familia': familia,
+    'NumCliente': num_cliente,
+    'NumPais': num_pais,
+    'Cajas_vendidas': pd.to_numeric(safe_col(df, 'Cajas vend'), errors='coerce').fillna(0),
+    'Unidades_por_caja': pd.to_numeric(safe_col(df, 'Cant x caja'), errors='coerce').fillna(0)
 }).dropna(subset=['Fecha'])
 
 # Guardar base en session_state para usarlo en PDF y perfiles
@@ -492,23 +515,30 @@ st.subheader('▶️ Control de secciones')
 
 if st.button('1) Calcular Súper ABC'):
     by_item = base.groupby('Articulo').agg(
-        popularidad=('NumDoc','nunique'),
-        unidades=('Unidades','sum'),
-        ventas=('Monto','sum'),
-        volumen=('Volumen_p3','sum'),
-        lineas=('NumDoc','count')
+        popularidad=('NumDoc', 'nunique'),
+        cajas=('Cajas_vendidas', 'sum'),
+        ventas=('Monto', 'sum'),
+        volumen=('Volumen_m3', 'sum'),
+        lineas=('NumDoc', 'count'),
+        Unidades=('Unidades', 'sum')
     )
-    # rotacion semanal (optimizado)
+
+    # Rotación basada en cajas
     with st.spinner("Calculando rotación semanal..."):
         days_range = (base['Fecha'].max() - base['Fecha'].min()).days + 1
-        weeks_range = max(1, days_range/7)
-        by_item['rotacion_sem'] = by_item['unidades'] / weeks_range
+        weeks_range = max(1, days_range / 7)
+        months_range = max(1, days_range / 30.44)
+        years_range = max(1, days_range / 365.25)
+
+        by_item['rotacion_sem'] = by_item['cajas'] / weeks_range
+        by_item['rotacion_mes'] = by_item['cajas'] / months_range
+        by_item['rotacion_anual'] = by_item['cajas'] / years_range
 
     # Usar la nueva función para generar combinaciones múltiples
     by_item = generate_super_abc_combinations(
-        by_item, 
-        criterios_seleccionados, 
-        cortes_abc, 
+        by_item,
+        criterios_seleccionados,
+        cortes_abc,
         criterios
     )
 
@@ -557,7 +587,6 @@ if st.button('1) Calcular Súper ABC'):
 
     export_df = sanitize_colnames(export_df)
     st.session_state['perfil_by_item_sanitizado'] = export_df
-
 
     # --- Comparación de artículos únicos para detectar pérdidas ---
     articulos_excel = set(df['Artículo'].astype(str).unique())
@@ -615,37 +644,97 @@ if 'by_item' in st.session_state:
     # Sección 2: Perfiles de Actividad
     # -------------------------------
     with st.expander("📈 Perfiles de Actividad", expanded=False):
-        # Mostrar información sobre los criterios utilizados
+        # -------------------------------
+        # Información de criterios
+        # -------------------------------
         criterios_usados = st.session_state.get('criterios_seleccionados', [crit1, crit2])
         st.subheader(f'📋 Resumen por categoría - Criterios: {", ".join(criterios_usados)}')
-        
-        # Mostrar estadísticas de las combinaciones generadas
+
         combinaciones_unicas = by_item['Clase_SuperABC'].nunique()
         st.info(f"Se generaron {combinaciones_unicas} combinaciones únicas de clasificación ABC")
-        
+
+        # -------------------------------
+        # Rotaciones por unidades y cajas
+        # -------------------------------
+        days_range = (base['Fecha'].max() - base['Fecha'].min()).days + 1
+        weeks_range = max(1, days_range/7)
+        months_range = max(1, days_range/30)
+        years_range = max(1, days_range/365)
+
+        # Rotación unidades
+        by_item['Rot_Unidades_Sem'] = by_item['Unidades'] / weeks_range
+        by_item['Rot_Unidades_Mes'] = by_item['Unidades'] / months_range
+        by_item['Rot_Unidades_Año'] = by_item['Unidades'] / years_range
+
+        # Rotación cajas
+        if 'Cajas_vendidas' in base.columns:
+            # Sumar cajas vendidas por artículo
+            by_item_cajas = base.groupby('Articulo')['Cajas_vendidas'].sum()
+            # Alinear con el índice de by_item
+            by_item['Cajas'] = by_item_cajas.reindex(by_item.index)
+            
+            # Calcular rotaciones en cajas
+            by_item['Rot_Cajas_Sem'] = by_item['Cajas'] / weeks_range
+            by_item['Rot_Cajas_Mes'] = by_item['Cajas'] / months_range
+            by_item['Rot_Cajas_Año'] = by_item['Cajas'] / years_range
+        else:
+            by_item['Rot_Cajas_Sem'] = np.nan
+            by_item['Rot_Cajas_Mes'] = np.nan
+            by_item['Rot_Cajas_Año'] = np.nan
+
+        # -------------------------------
+        # Tabla resumen por Clase_SuperABC
+        # -------------------------------
         summary = by_item.groupby('Clase_SuperABC').agg(
             Cantidad=('Clase_SuperABC','count'),
             Zona_Bodega=('Zona_Bodega','first'),
             Politica=('Política_Inv','first'),
             FillRate=('FillRate_obj','first'),
             Ventas=('ventas','sum'),
+            Volumen=('volumen','sum'),
+            Rot_Unidades_Sem=('Rot_Unidades_Sem','mean'),
+            Rot_Unidades_Mes=('Rot_Unidades_Mes','mean'),
+            Rot_Unidades_Año=('Rot_Unidades_Año','mean'),
+            Rot_Cajas_Sem=('Rot_Cajas_Sem','mean'),
+            Rot_Cajas_Mes=('Rot_Cajas_Mes','mean'),
+            Rot_Cajas_Año=('Rot_Cajas_Año','mean'),
+            Popularidad=('popularidad','mean'),
             Frecuencia_Recuento=('Frecuencia_Recuento','first')
         ).reset_index()
 
-        # Insertar columna IRA después de FillRate
+        # IRA
         summary['IRA'] = summary['Clase_SuperABC'].apply(ira_by_class)
 
-        summary['Porcentaje'] = (summary['Cantidad']/summary['Cantidad'].sum()*100).round(2)
-        total_sales = summary['Ventas'].sum()
-        summary['% Ventas'] = (100 * summary['Ventas'] / (total_sales if total_sales>0 else 1)).round(2)
+        # Porcentajes de suma
+        summary['% Artículos'] = (100 * summary['Cantidad'] / summary['Cantidad'].sum()).round(2)
+        summary['% Ventas'] = (100 * summary['Ventas'] / summary['Ventas'].sum()).round(2)
+        summary['% Volumen'] = (100 * summary['Volumen'] / summary['Volumen'].sum()).round(2)
 
-        # Ordenar categorías - para múltiples criterios, ordenar alfabéticamente
+        # Porcentajes de promedio (rotaciones y popularidad)
+        for col in ['Rot_Unidades_Sem','Rot_Unidades_Mes','Rot_Unidades_Año',
+                    'Rot_Cajas_Sem','Rot_Cajas_Mes','Rot_Cajas_Año','Popularidad']:
+            summary[f'% {col}'] = (100 * summary[col] / summary[col].sum()).round(2)
+
+        # -------------------------------
+        # Ordenar y mostrar
+        # -------------------------------
         summary = summary.sort_values('Clase_SuperABC')
 
-        # Reordenar columnas para que IRA quede después de FillRate
-        cols = ['Clase_SuperABC','Cantidad','Zona_Bodega','Politica','FillRate','IRA',
-                'Frecuencia_Recuento','Ventas','Porcentaje','% Ventas']
-        summary = summary[cols]
+        cols_display = [
+            'Clase_SuperABC','Cantidad','% Artículos','Zona_Bodega','Politica','FillRate','IRA',
+            'Frecuencia_Recuento','Ventas','% Ventas',
+            'Volumen','% Volumen',
+            'Rot_Unidades_Sem','% Rot_Unidades_Sem',
+            'Rot_Unidades_Mes','% Rot_Unidades_Mes',
+            'Rot_Unidades_Año','% Rot_Unidades_Año',
+            'Rot_Cajas_Sem','% Rot_Cajas_Sem',
+            'Rot_Cajas_Mes','% Rot_Cajas_Mes',
+            'Rot_Cajas_Año','% Rot_Cajas_Año',
+            'Popularidad','% Popularidad'
+        ]
+
+        summary = summary[[c for c in cols_display if c in summary.columns]]  # evita KeyError
+
 
         st.dataframe(summary)
         st.session_state['perfil_resumen'] = summary
@@ -663,16 +752,16 @@ if 'by_item' in st.session_state:
         st.session_state['perfil_lineas'] = dist_lines
 
         # Perfil: cubicaje por orden
-        st.subheader('% de órdenes por rango de volumen (pies³)')
-        cubic_per_order = base.groupby('NumDoc').agg(volumen_total=('Volumen_p3','sum')).reset_index()
-        vol_bins = [-1,1,2,5,10,20,50,1e9]
-        vol_labels = ['≤1','1-2','2-5','5-10','10-20','20-50','>50']
+        st.subheader('% de órdenes por rango de volumen (m³)')
+        cubic_per_order = base.groupby('NumDoc').agg(volumen_total=('Volumen_m3','sum')).reset_index()
+        vol_bins = [-1, 0.5, 1, 2, 5, 10, 20, 50, 1e9]  # Ajusta los rangos para m³
+        vol_labels = ['≤0.5', '0.5-1', '1-2', '2-5', '5-10', '10-20', '20-50', '>50']
         cubic_per_order['vol_bin'] = pd.cut(cubic_per_order['volumen_total'], bins=vol_bins, labels=vol_labels)
         dist_cubic = cubic_per_order.groupby('vol_bin').size().rename('conteo').reset_index()
         total_orders2 = dist_cubic['conteo'].sum()
         dist_cubic['%_ordenes'] = 100 * dist_cubic['conteo']/ (total_orders2 if total_orders2>0 else 1)
         st.dataframe(dist_cubic)
-        fig_cubic = px.bar(dist_cubic, x='vol_bin', y='%_ordenes', labels={'vol_bin':'Rango volumen (pies³)','%_ordenes':'% de órdenes'})
+        fig_cubic = px.bar(dist_cubic, x='vol_bin', y='%_ordenes', labels={'vol_bin':'Rango volumen (m³)','%_ordenes':'% de órdenes'})
         st.plotly_chart(fig_cubic, use_container_width=True)
 
         st.session_state['perfil_cubicaje'] = dist_cubic
@@ -695,7 +784,7 @@ if 'by_item' in st.session_state:
         # Preparar datos
         lv = base.groupby('NumDoc').agg(
             lineas=('Articulo','nunique'),
-            volumen_total=('Volumen_p3','sum')
+            volumen_total=('Volumen_m3','sum')
         ).reset_index()
 
         # Parámetro: volumen de una tarima completa (ajusta según tu operación)
@@ -739,8 +828,8 @@ if 'by_item' in st.session_state:
         line_labels = ['1','2-5','6-9','10+']
         lv['r_lineas'] = pd.cut(lv['lineas'], bins=[0,1,6,10,1e9], labels=line_labels, right=True, include_lowest=True)
 
-        vol_labels = ['0-1','1-2','2-5','5-10','10-20','20+']
-        lv['r_vol'] = pd.cut(lv['volumen_total'], bins=[0,1,2,5,10,20,1e9], labels=vol_labels, right=True, include_lowest=True)
+        vol_labels = ['≤0.5', '0.5-1', '1-2', '2-5', '5-10', '10-20', '20-50', '>50']
+        lv['r_vol'] = pd.cut(lv['volumen_total'], bins=[-1, 0.5, 1, 2, 5, 10, 20, 50, 1e9], labels=vol_labels, right=True, include_lowest=True)
 
         # Desglose de pedidos por rango de líneas (incluyendo volumen)
         st.subheader('Desglose de pedidos por rango de líneas')
@@ -783,8 +872,10 @@ if 'by_item' in st.session_state:
         totales_row['% linea'] = 100
         table_final.loc['Totales'] = totales_row
 
-        # Fila % pedidos (por columna)
-        pct_pedidos_row = (table_final.loc[line_labels, vol_labels].sum() / table_final['Totales'].sum() * 100).round(2)
+        # ✅ Fila % pedidos (por columna, ahora bien calculada)
+        total_pedidos_global = table_final.loc[line_labels, vol_labels].values.sum()
+        pct_pedidos_row = (table_final.loc[line_labels, vol_labels].sum() / total_pedidos_global * 100).round(2)
+
         pct_pedidos_row['Totales'] = 100
         pct_pedidos_row['% pedidos'] = np.nan
         pct_pedidos_row['Total_Linea'] = np.nan
@@ -805,6 +896,61 @@ if 'by_item' in st.session_state:
 
         # Mostrar tabla
         st.dataframe(table_final.round(2))
+
+        import plotly.express as px
+        import plotly.graph_objects as go
+
+        # -------------------------------
+        # 1️⃣ Barras apiladas interactivas (líneas por volumen)
+        # -------------------------------
+        table_plot = table_final.loc[line_labels, vol_labels].astype(float)
+        table_plot_reset = table_plot.reset_index().rename(columns={'index':'Rango de líneas'})
+
+        fig_barras = px.bar(
+            table_plot_reset,
+            x='Líneas por orden / Volumen por orden',
+            y=vol_labels,
+            labels={'value':'Cantidad de pedidos','Rango de líneas':'Líneas por orden'},
+            title='Distribución de pedidos por líneas y volumen (interactivo)',
+            text_auto=True
+        )
+        st.plotly_chart(fig_barras, use_container_width=True)
+
+        # -------------------------------
+        # 2️⃣ Gráfico de pastel interactivo (por volumen total)
+        # -------------------------------
+        pie_data = table_final.loc['Totales', vol_labels].astype(float)
+        fig_pastel = px.pie(
+            names=pie_data.index,
+            values=pie_data.values,
+            title='Distribución de pedidos por volumen total',
+            hole=0.3  # donut
+        )
+        st.plotly_chart(fig_pastel, use_container_width=True)
+
+        # -------------------------------
+        # 3️⃣ Heatmap interactivo (líneas x volumen)
+        # -------------------------------
+        heatmap_data = table_final.loc[line_labels, vol_labels].astype(float)
+
+        fig_heatmap = go.Figure(
+            data=go.Heatmap(
+                z=heatmap_data.values,
+                x=heatmap_data.columns,
+                y=heatmap_data.index,
+                colorscale='YlGnBu',
+                text=heatmap_data.values,
+                texttemplate="%{text}",
+                colorbar=dict(title="Cantidad de pedidos")
+            )
+        )
+        fig_heatmap.update_layout(
+            title='Heatmap: Pedidos por líneas y volumen',
+            xaxis_title='Volumen por orden (m³)',
+            yaxis_title='Líneas por orden'
+        )
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+
 
         st.session_state['perfil_cruzado'] = table_final
 
@@ -866,660 +1012,431 @@ if 'by_item' in st.session_state:
     by_item = st.session_state['by_item']
     base = st.session_state['base']
 
-    with st.expander("🔮 Forecasting de Demanda por Artículo", expanded=False):
-        st.header('🔮 Forecasting de Demanda por Artículo')
+    from statsmodels.tsa.seasonal import seasonal_decompose
+    import plotly.graph_objects as go
 
-        # Selección de artículo
-        articulos = sorted(base['Articulo'].unique())
-        articulo_sel = st.selectbox('Selecciona Artículo para pronóstico', articulos, key='forecast_articulo')
+    with st.expander("🔮 Análisis de Demanda por Artículo", expanded=False):
+        st.header('🔮 Análisis de Demanda por Artículo')
 
-        # Período y cantidad de forecast
-        periodo_forecast = st.selectbox('Periodo de forecast', ['Mensual', 'Semanal'], index=0)
-        n_periods = st.number_input(f'Períodos a pronosticar ({periodo_forecast.lower()})', min_value=1, max_value=52, value=4, step=1)
+        with st.expander("ℹ️ ¿Qué estudia esta sección?", expanded=False):
+            st.markdown("""
+            Esta sección está diseñada para **analizar la demanda histórica de un artículo específico**, permitiendo comprender cómo ha evolucionado a lo largo del tiempo y detectar patrones de comportamiento relevantes.  
 
-        # Unidad a pronosticar
-        unidad_forecast = st.selectbox('Unidad a pronosticar', ['Unidades vendidas', 'Cajas vendidas'], index=0)
-        columna_forecast = 'Unidades' if unidad_forecast=='Unidades vendidas' else 'Cajas_vendidas'
+    **Objetivos principales:**
+    1. **Visualizar la serie histórica de demanda:**  
+       - Observar la evolución de ventas o unidades despachadas.  
+       - Analizar con frecuencia semanal o mensual según la granularidad de los datos.
+
+    2. **Identificar la tendencia de la demanda:**  
+       - Mediante suavizado (promedio móvil), se destaca la tendencia subyacente.  
+       - Permite detectar si la demanda está **creciendo, decreciendo o se mantiene estable**.
+
+    3. **Detectar estacionalidad o patrones repetitivos:**  
+       - Analiza la autocorrelación de la serie para identificar ciclos de demanda.  
+       - Los rezagos significativos indican posibles patrones estacionales.
+
+    4. **Interpretación simplificada con pocos datos:**  
+       - Para series cortas o irregulares, se ofrece un análisis alternativo con suavizado y autocorrelación parcial.
+            """)
+
+        with st.expander("ℹ️ ¿Qué métricas se utilizan y cómo interpretarlas?", expanded=False):
+            st.markdown("""
+             **Métricas y su interpretación:**
+    
+    1. **Serie histórica:**  
+       - Gráfico de la demanda a lo largo del tiempo.  
+       - Permite observar cambios, picos o caídas en las ventas.
+
+    2. **Tendencia suavizada:**  
+       - Promedio móvil de 3 períodos (o ajustable).  
+       - Indica la dirección general de la demanda (creciente, decreciente o estable).
+
+    3. **Autocorrelación (ACF):**  
+       - Mide la correlación de la demanda con sus propios rezagos.  
+       - **Interpretación de rezagos:**  
+         - Un rezago de 1 mes/semana indica cómo la demanda actual se relaciona con la del período anterior.  
+         - Rezagos significativos más largos (2, 3, …) muestran patrones repetitivos o estacionales.  
+         - Por ejemplo, un rezago significativo de 12 meses sugiere que la demanda se repite anualmente en ese mes.
+
+    4. **Interpretación resumida:**  
+       - Con base en la tendencia y la ACF, se puede anticipar estacionalidad y dirección de la demanda.  
+       - Útil para planificación de inventarios, producción y estrategias de abastecimiento.
+            """)
+        # Selección de nivel de análisis
+        nivel_analisis = st.selectbox('Nivel de análisis', ['Articulo', 'Familia'], index=0)
+
+        # Selección de artículo o familia
+        if nivel_analisis == 'Articulo':
+            opciones = sorted(base['Articulo'].unique())
+            seleccion = st.selectbox('Selecciona Artículo para analizar', opciones, key='analizar_articulo')
+            columna_estudio = 'Unidades' if st.selectbox('Unidad a pronosticar', ['Unidades vendidas', 'Cajas vendidas'], index=0) == 'Unidades vendidas' else 'Cajas_vendidas'
+        else:
+            opciones = sorted(base['Familia'].unique())
+            seleccion = st.selectbox('Selecciona Familia para analizar', opciones, key='analizar_familia')
+            columna_estudio = 'Unidades' if st.selectbox('Unidad a pronosticar', ['Unidades vendidas', 'Cajas vendidas'], index=0) == 'Unidades vendidas' else 'Cajas_vendidas'
 
         # Filtrar datos
-        base_art = base[base['Articulo']==articulo_sel].copy()
-        if base_art.empty:
-            st.warning("No hay registros para ese artículo.")
+        if nivel_analisis not in base.columns:
+            st.error(f"El nivel de análisis '{nivel_analisis}' no existe en las columnas de base.")
+            st.write("Columnas disponibles:", base.columns)
             st.stop()
-        for col in ['Unidades','Cajas_vendidas']:
-            base_art[col] = pd.to_numeric(base_art.get(col,0), errors='coerce').fillna(0)
+
+        base_filtrada = base[base[nivel_analisis] == seleccion].copy()
+
+        if base_filtrada.empty:
+            st.warning(f"No hay registros para {nivel_analisis.lower()} seleccionado.")
+            st.stop()
 
         # Serie histórica
-        orders_df = base_art.groupby('NumDoc').agg(Fecha=('Fecha','max'),
-                                                Unidades=('Unidades','sum'),
-                                                Cajas_vendidas=('Cajas_vendidas','sum')).reset_index()
-        resample_freq = 'MS' if periodo_forecast=='Mensual' else 'W-MON'
-        date_offset = pd.DateOffset(months=1) if periodo_forecast=='Mensual' else pd.DateOffset(weeks=1)
-        ts_art = orders_df.set_index('Fecha')[columna_forecast].resample(resample_freq).sum().fillna(0)
+        resample_freq = 'MS' if st.selectbox('Frecuencia de estudio', ['Mensual', 'Semanal'], index=0) == 'Mensual' else 'W-MON'
+        ts = base_filtrada.groupby('Fecha')[columna_estudio].sum().resample(resample_freq).sum().fillna(0)
+        ts.index.freq = resample_freq
         st.subheader("Serie histórica")
-        st.line_chart(ts_art)
+        st.line_chart(ts)
 
-        import numpy as np
-        import pandas as pd
-        from sklearn.ensemble import RandomForestRegressor
-        from sklearn.metrics import mean_absolute_error, mean_squared_error
-        import plotly.graph_objects as go
+        # --- Panel interactivo para parámetros de análisis ---
+        st.subheader("⚙️ Configuración del análisis")
 
-        # Modelos
-        modelos = ['Media móvil (4 periodos)','Holt-Winters','Prophet','Random Forest']
-        forecasts_dict = {}
-        resultados = []
+        modelo_descomp = st.radio(
+            "Modelo de descomposición",
+            options=["Aditivo", "Multiplicativo"],
+            index=0,
+            horizontal=True
+        )
 
-        for modelo in modelos:
+        periodo_default = 12 if resample_freq == "MS" else 52
+        periodo_estacionalidad = st.number_input(
+            "Periodo de estacionalidad (ej. 12 meses, 52 semanas)",
+            min_value=2, max_value=200, value=periodo_default, step=1
+        )
+
+        umbral_estacionalidad = st.slider(
+            "Sensibilidad para considerar estacionalidad significativa",
+            min_value=0.1, max_value=1.0, value=0.3, step=0.05
+        )
+
+        # --- Análisis de tendencia y estacionalidad ---
+        st.subheader("📊 Tendencia y Estacionalidad")
+
+        # Validar si hay suficientes datos
+        if len(ts) >= 2 * periodo_estacionalidad:
             try:
-                last_index = ts_art.index[-1]
-                future_index = pd.date_range(start=last_index + date_offset, periods=n_periods, freq=resample_freq)
-                forecast_future = None
-                forecast_hist = None
+                decomposition = seasonal_decompose(
+                    ts,
+                    model="additive" if modelo_descomp == "Aditivo" else "multiplicative",
+                    period=periodo_estacionalidad
+                )
 
-                # ---------------- Media Móvil ----------------
-                if modelo=='Media móvil (4 periodos)':
-                    ma = ts_art.rolling(window=4, min_periods=1).mean().shift(1)
-                    ma = ma.fillna(ts_art)  # reemplazar NaN iniciales
-                    forecast_future = pd.Series([ma.iloc[-1]]*n_periods, index=future_index)
-                    forecast_hist = ma
+                # Graficar resultados de la descomposición
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=decomposition.trend.index, y=decomposition.trend,
+                                        mode='lines', name='Tendencia'))
+                fig.add_trace(go.Scatter(x=decomposition.seasonal.index, y=decomposition.seasonal,
+                                        mode='lines', name='Estacionalidad'))
+                fig.add_trace(go.Scatter(x=decomposition.resid.index, y=decomposition.resid,
+                                        mode='lines', name='Residuales'))
 
-                # ---------------- Holt-Winters ----------------
-                elif modelo=='Holt-Winters':
-                    if len(ts_art) >= 2:
-                        # Detectar estacionalidad automáticamente si hay suficientes ciclos
-                        period = None
-                        if periodo_forecast=='Mensual' and len(ts_art) >= 24:
-                            period = 12
-                        elif periodo_forecast=='Semanal' and len(ts_art) >= 104:
-                            period = 52
+                fig.update_layout(
+                    title="Descomposición de la serie",
+                    xaxis_title="Fecha", yaxis_title="Demanda",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
-                        hw = sm.tsa.ExponentialSmoothing(
-                            ts_art,
-                            trend='add',
-                            seasonal='add' if period else None,
-                            seasonal_periods=period,
-                            initialization_method="estimated"
-                        ).fit()
-                        forecast_future = pd.Series(hw.forecast(n_periods).values, index=future_index)
-                        forecast_hist = hw.fittedvalues
+                # Interpretación automática
+                st.markdown("### 🔍 Interpretación automática")
+                if decomposition.trend.notna().sum() > 0:
+                    tendencia = decomposition.trend.dropna()
+                    if tendencia.iloc[-1] > tendencia.iloc[0]:
+                        st.success("🔼 La demanda muestra una **tendencia creciente**.")
+                    elif tendencia.iloc[-1] < tendencia.iloc[0]:
+                        st.error("🔽 La demanda muestra una **tendencia decreciente**.")
                     else:
-                        st.info("Holt-Winters omitido por pocos datos.")
+                        st.info("⏸ La demanda se mantiene relativamente estable.")
 
-                # ---------------- Prophet ----------------
-                elif modelo=='Prophet':
-                    from prophet import Prophet
-                    df_prophet = ts_art.reset_index().rename(columns={'Fecha':'ds', columna_forecast:'y'})
-                    
-                    if len(df_prophet) >= 3:
-                        # Decidir automáticamente la estacionalidad
-                        yearly = False
-                        weekly = False
-                        daily = False  # normalmente no se usa para datos semanales/mensuales
-
-                        if periodo_forecast=='Mensual' and len(ts_art) >= 24:
-                            yearly = True
-                        if periodo_forecast=='Semanal':
-                            if len(ts_art) >= 104:
-                                yearly = True
-                            if len(ts_art) >= 8:
-                                weekly = True
-
-                        m = Prophet(yearly_seasonality=yearly,
-                                    weekly_seasonality=weekly,
-                                    daily_seasonality=daily)
-                        m.fit(df_prophet)
-                        future_all = m.make_future_dataframe(periods=n_periods, freq=resample_freq)
-                        forecast = m.predict(future_all)
-                        # Forzar valores positivos para forecast futuro
-                        forecast_future = pd.Series(np.maximum(forecast['yhat'].tail(n_periods).values, 0),
-                                                    index=forecast['ds'].tail(n_periods))
-                        forecast_hist = pd.Series(forecast['yhat'].iloc[:len(ts_art)].values, index=ts_art.index)
-
-
-                # ---------------- Random Forest ----------------
-                elif modelo=='Random Forest':
-                    df_ml = ts_art.copy().reset_index()
-                    df_ml.rename(columns={'Fecha':'Periodo', columna_forecast:'y'}, inplace=True)
-                    # Reindexar a frecuencia continua y rellenar vacíos
-                    df_ml = df_ml.set_index('Periodo').asfreq(resample_freq, fill_value=0).reset_index()
-                    max_lag = 4
-                    for lag in range(1, max_lag+1):
-                        df_ml[f'lag_{lag}'] = df_ml['y'].shift(lag)
-                        df_ml[f'lag_{lag}'].fillna(df_ml['y'].iloc[0], inplace=True)  # Rellenar NaN iniciales
-
-                    X = df_ml[[f'lag_{i}' for i in range(1, max_lag+1)]].to_numpy()
-                    y = df_ml['y'].to_numpy()
-                    rf = RandomForestRegressor(n_estimators=200, random_state=42)
-                    rf.fit(X, y)
-
-                    # Forecast futuro
-                    last_values = list(df_ml.iloc[-1][[f'lag_{i}' for i in range(1, max_lag+1)]])
-                    preds_future = []
-                    for _ in range(n_periods):
-                        pred = rf.predict([last_values])[0]
-                        pred = max(pred, 0)
-                        preds_future.append(pred)
-                        last_values = [pred] + last_values[:-1]
-                    forecast_future = pd.Series(preds_future, index=future_index)
-
-                    # Forecast histórico
-                    forecast_hist = pd.Series(rf.predict(X), index=df_ml['Periodo'])
-                    forecast_hist = forecast_hist.reindex(ts_art.index, method='ffill')
-
-                # Guardar resultados y métricas
-                if forecast_future is not None:
-                    forecasts_dict[modelo] = {'future':forecast_future, 'hist':forecast_hist}
-                    if forecast_hist is not None and len(forecast_hist)==len(ts_art):
-                        y_true = ts_art.values
-                        y_pred = forecast_hist.values
-                        mae = mean_absolute_error(y_true, y_pred)
-                        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-                        mape = np.mean(np.abs((y_true-y_pred)/(y_true+1e-9)))*100
-                        # Detectar posibles valores absurdos
-                        mape_warning = mape > 1000  # umbral arbitrario para advertencia
-                        if mape_warning:
-                            st.warning(f"⚠️ El MAPE del modelo '{modelo}' es extremadamente alto ({mape:.2f}%). Esto puede ocurrir por valores cercanos a cero en la serie histórica y puede no reflejar un error realista. Use el MAPE simétrico (SMAPE) como referencia.")
-                        smape = 100 * np.mean(2 * np.abs(y_true - y_pred) / (np.abs(y_true) + np.abs(y_pred) + 1e-9))
-                        resultados.append({'Modelo':modelo,'MAE':mae,'RMSE':rmse,'MAPE (%)':mape,'SMAPE (%)':smape})
+                seasonal_strength = decomposition.seasonal.std() / ts.std() if ts.std() > 0 else 0
+                if seasonal_strength > umbral_estacionalidad:
+                    st.success("📈 Se observa una **estacionalidad significativa** (patrones recurrentes).")
+                else:
+                    st.info("📉 No se detecta una estacionalidad marcada en la serie.")
 
             except Exception as e:
-                st.warning(f"{modelo} omitido: {e}")
-                
-        # ----------- Tabla de métricas -----------
-        df_resultados = pd.DataFrame(resultados)
-        if not df_resultados.empty:
-            st.subheader("📊 Comparación de métricas")
-            st.dataframe(df_resultados.round(2).sort_values('RMSE'))
+                st.warning("⚠️ Ocurrió un problema en la descomposición.")
+                st.error(e)
 
-        # ----------- Selección de modelos a mostrar -----------
-        modelos_disp = st.multiselect("Selecciona modelos a mostrar en la gráfica", list(forecasts_dict.keys()), default=list(forecasts_dict.keys()))
-
-        # ----------- Gráfico interactivo con Plotly -----------
-        st.subheader("📈 Comparativa interactiva de forecasts")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=ts_art.index, y=ts_art.values, mode='lines+markers', name='Observado', line=dict(color='black', width=3)))
-        for modelo in modelos_disp:
-            data = forecasts_dict[modelo]
-            if data['hist'] is not None:
-                fig.add_trace(go.Scatter(x=data['hist'].index, y=data['hist'].values, mode='lines', name=f"{modelo} (hist)", line=dict(dash='dot')))
-            fig.add_trace(go.Scatter(x=data['future'].index, y=data['future'].values, mode='lines+markers', name=f"{modelo} (futuro)"))
-        fig.update_layout(hovermode='x unified', xaxis_title='Fecha', yaxis_title=columna_forecast)
-        st.plotly_chart(fig, use_container_width=True)
-
-        # ----------- Descarga ZIP -----------
-        import io, zipfile
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, 'w') as zf:
-            if not df_resultados.empty:
-                zf.writestr("comparacion_metricas.csv", df_resultados.round(2).to_csv(index=False))
-            all_forecasts = pd.DataFrame({m:data['future'] for m,data in forecasts_dict.items()})
-            all_forecasts.index.name='Periodo'
-            all_forecasts.reset_index(inplace=True)
-            zf.writestr("forecasts_modelos.csv", all_forecasts.round(2).to_csv(index=False))
-        st.download_button("📥 Descargar resultados completos (ZIP)", data=buffer.getvalue(),
-                        file_name=f"forecast_completo_{articulo_sel}.zip", mime="application/zip")
-        
-    with st.expander("🎯 Forecasting de Demanda por Categorías Súper ABC", expanded=False):
-        st.header('🎯 Forecasting de Demanda por Categorías Súper ABC')
-        
-        st.markdown("""
-        Esta sección permite hacer pronósticos de demanda agregada por categorías del Súper ABC, 
-        lo cual es útil para planificación estratégica y gestión de inventarios a nivel de categoría.
-        
-        **Modelos disponibles:** Media móvil, Holt-Winters, Prophet y Random Forest (mismo conjunto que para SKU individual).
-        """)
-        
-        # Verificar que tenemos datos de Súper ABC
-        if 'Clase_SuperABC' not in by_item.columns:
-            st.warning("⚠️ Primero debes calcular el Súper ABC para usar esta funcionalidad.")
         else:
-            # Obtener categorías disponibles
-            categorias_disponibles = sorted(by_item['Clase_SuperABC'].unique())
-            
-            # Selección de categorías
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Permitir selección múltiple de categorías
-                categorias_seleccionadas = st.multiselect(
-                    'Selecciona las categorías ABC a pronosticar:',
-                    categorias_disponibles,
-                    default=categorias_disponibles[:3] if len(categorias_disponibles) >= 3 else categorias_disponibles,
-                    help='Puedes seleccionar una o más categorías para comparar sus pronósticos'
-                )
-            
-            with col2:
-                # Parámetros de forecast
-                periodo_forecast_cat = st.selectbox('Periodo de forecast', ['Mensual', 'Semanal'], index=0, key='forecast_cat_periodo')
-                n_periods_cat = st.number_input(f'Períodos a pronosticar ({periodo_forecast_cat.lower()})', 
-                                            min_value=1, max_value=52, value=6, step=1, key='forecast_cat_periods')
-                unidad_forecast_cat = st.selectbox('Unidad a pronosticar', ['Unidades vendidas', 'Cajas vendidas'], 
-                                                index=0, key='forecast_cat_unidad')
-            
-            if categorias_seleccionadas:
-                columna_forecast_cat = 'Unidades' if unidad_forecast_cat=='Unidades vendidas' else 'Cajas_vendidas'
-                
-                # Agregar datos por categoría
-                base_con_categoria = base.merge(
-                    by_item[['Clase_SuperABC']].reset_index(), 
-                    left_on='Articulo', 
-                    right_on='Articulo', 
-                    how='left'
-                )
-                
-                # Filtrar solo las categorías seleccionadas
-                base_categorias = base_con_categoria[base_con_categoria['Clase_SuperABC'].isin(categorias_seleccionadas)]
-                
-                if base_categorias.empty:
-                    st.warning("No hay datos para las categorías seleccionadas.")
-                else:
-                    # Agregar por categoría y fecha
-                    resample_freq_cat = 'MS' if periodo_forecast_cat=='Mensual' else 'W-MON'
-                    date_offset_cat = pd.DateOffset(months=1) if periodo_forecast_cat=='Mensual' else pd.DateOffset(weeks=1)
-                    
-                    # Agregar datos por categoría y período
-                    ts_categorias = base_categorias.groupby(['Clase_SuperABC', 'Fecha'])[columna_forecast_cat].sum().reset_index()
-                    ts_categorias = ts_categorias.set_index('Fecha').groupby('Clase_SuperABC')[columna_forecast_cat].resample(resample_freq_cat).sum().fillna(0)
-                    
-                    # Mostrar series históricas
-                    st.subheader("📊 Series históricas por categoría")
-                    ts_categorias_pivot = ts_categorias.unstack(level=0).fillna(0)
-                    st.line_chart(ts_categorias_pivot)
-                    
-                    # Estadísticas por categoría
-                    st.subheader("📈 Estadísticas por categoría")
-                    stats_categorias = ts_categorias.groupby('Clase_SuperABC').agg([
-                        'count', 'mean', 'std', 'min', 'max', 'sum'
-                    ]).round(2)
-                    stats_categorias.columns = ['Períodos', 'Promedio', 'Desv. Est.', 'Mínimo', 'Máximo', 'Total']
-                    st.dataframe(stats_categorias)
-                    
-                    # Forecasting por categoría
-                    st.subheader("🔮 Pronósticos por categoría")
-                    
-                    # Modelos para categorías (incluir Random Forest como en SKU individual)
-                    modelos_cat = ['Media móvil (4 periodos)', 'Holt-Winters', 'Prophet', 'Random Forest']
-                    forecasts_cat_dict = {}
-                    resultados_cat = []
-                    
-                    for categoria in categorias_seleccionadas:
-                        if categoria in ts_categorias.index.get_level_values(0):
-                            ts_cat = ts_categorias.loc[categoria]
-                            
-                            if len(ts_cat) < 2:
-                                st.warning(f"Categoría {categoria}: Insuficientes datos para pronóstico")
-                                continue
-                            
-                            st.write(f"**Pronosticando categoría: {categoria}**")
-                            
-                            # Crear índice futuro
-                            last_index_cat = ts_cat.index[-1]
-                            future_index_cat = pd.date_range(start=last_index_cat + date_offset_cat, 
-                                                        periods=n_periods_cat, freq=resample_freq_cat)
-                            
-                            categoria_forecasts = {}
-                            
-                            for modelo in modelos_cat:
-                                try:
-                                    forecast_future_cat = None
-                                    forecast_hist_cat = None
-                                    
-                                    # Media Móvil
-                                    if modelo == 'Media móvil (4 periodos)':
-                                        ma_cat = ts_cat.rolling(window=4, min_periods=1).mean().shift(1)
-                                        ma_cat = ma_cat.fillna(ts_cat)
-                                        forecast_future_cat = pd.Series([ma_cat.iloc[-1]]*n_periods_cat, index=future_index_cat)
-                                        forecast_hist_cat = ma_cat
-                                    
-                                    # Holt-Winters
-                                    elif modelo == 'Holt-Winters':
-                                        if len(ts_cat) >= 2:
-                                            period_cat = None
-                                            if periodo_forecast_cat=='Mensual' and len(ts_cat) >= 24:
-                                                period_cat = 12
-                                            elif periodo_forecast_cat=='Semanal' and len(ts_cat) >= 104:
-                                                period_cat = 52
-                                            
-                                            hw_cat = sm.tsa.ExponentialSmoothing(
-                                                ts_cat,
-                                                trend='add',
-                                                seasonal='add' if period_cat else None,
-                                                seasonal_periods=period_cat,
-                                                initialization_method="estimated"
-                                            ).fit()
-                                            forecast_future_cat = pd.Series(hw_cat.forecast(n_periods_cat).values, index=future_index_cat)
-                                            forecast_hist_cat = hw_cat.fittedvalues
-                                    
-                                    # Prophet
-                                    elif modelo == 'Prophet':
-                                        df_prophet_cat = ts_cat.reset_index().rename(columns={'Fecha':'ds', columna_forecast_cat:'y'})
-                                        
-                                        if len(df_prophet_cat) >= 3:
-                                            yearly_cat = False
-                                            weekly_cat = False
-                                            
-                                            if periodo_forecast_cat=='Mensual' and len(ts_cat) >= 24:
-                                                yearly_cat = True
-                                            if periodo_forecast_cat=='Semanal':
-                                                if len(ts_cat) >= 104:
-                                                    yearly_cat = True
-                                                if len(ts_cat) >= 8:
-                                                    weekly_cat = True
-                                            
-                                            m_cat = Prophet(yearly_seasonality=yearly_cat,
-                                                        weekly_seasonality=weekly_cat,
-                                                        daily_seasonality=False)
-                                            m_cat.fit(df_prophet_cat)
-                                            future_all_cat = m_cat.make_future_dataframe(periods=n_periods_cat, freq=resample_freq_cat)
-                                            forecast_cat = m_cat.predict(future_all_cat)
-                                            forecast_future_cat = pd.Series(np.maximum(forecast_cat['yhat'].tail(n_periods_cat).values, 0),
-                                                                        index=forecast_cat['ds'].tail(n_periods_cat))
-                                            forecast_hist_cat = pd.Series(forecast_cat['yhat'].iloc[:len(ts_cat)].values, index=ts_cat.index)
-                                    
-                                    # Random Forest
-                                    elif modelo == 'Random Forest':
-                                        df_ml_cat = ts_cat.copy().reset_index()
-                                        df_ml_cat.rename(columns={'Fecha':'Periodo', columna_forecast_cat:'y'}, inplace=True)
-                                        # Reindexar a frecuencia continua y rellenar vacíos
-                                        df_ml_cat = df_ml_cat.set_index('Periodo').asfreq(resample_freq_cat, fill_value=0).reset_index()
-                                        
-                                        max_lag_cat = 4
-                                        for lag in range(1, max_lag_cat+1):
-                                            df_ml_cat[f'lag_{lag}'] = df_ml_cat['y'].shift(lag)
-                                            df_ml_cat[f'lag_{lag}'].fillna(df_ml_cat['y'].iloc[0], inplace=True)  # Rellenar NaN iniciales
-                                        
-                                        X_cat = df_ml_cat[[f'lag_{i}' for i in range(1, max_lag_cat+1)]].to_numpy()
-                                        y_cat = df_ml_cat['y'].to_numpy()
-                                        
-                                        rf_cat = RandomForestRegressor(n_estimators=200, random_state=42)
-                                        rf_cat.fit(X_cat, y_cat)
-                                        
-                                        # Forecast futuro
-                                        last_values_cat = list(df_ml_cat.iloc[-1][[f'lag_{i}' for i in range(1, max_lag_cat+1)]])
-                                        preds_future_cat = []
-                                        for _ in range(n_periods_cat):
-                                            pred_cat = rf_cat.predict([last_values_cat])[0]
-                                            pred_cat = max(pred_cat, 0)
-                                            preds_future_cat.append(pred_cat)
-                                            last_values_cat = [pred_cat] + last_values_cat[:-1]
-                                        
-                                        forecast_future_cat = pd.Series(preds_future_cat, index=future_index_cat)
-                                        
-                                        # Forecast histórico
-                                        forecast_hist_cat = pd.Series(rf_cat.predict(X_cat), index=df_ml_cat['Periodo'])
-                                        forecast_hist_cat = forecast_hist_cat.reindex(ts_cat.index, method='ffill')
-                                    
-                                    if forecast_future_cat is not None:
-                                        categoria_forecasts[modelo] = {'future': forecast_future_cat, 'hist': forecast_hist_cat}
-                                        
-                                        # Calcular métricas
-                                        if forecast_hist_cat is not None and len(forecast_hist_cat) == len(ts_cat):
-                                            y_true_cat = ts_cat.values
-                                            y_pred_cat = forecast_hist_cat.values
-                                            mae_cat = mean_absolute_error(y_true_cat, y_pred_cat)
-                                            rmse_cat = np.sqrt(mean_squared_error(y_true_cat, y_pred_cat))
-                                            mape_cat = np.mean(np.abs((y_true_cat-y_pred_cat)/(y_true_cat+1e-9)))*100
-                                            smape_cat = 100 * np.mean(2 * np.abs(y_true_cat - y_pred_cat) / (np.abs(y_true_cat) + np.abs(y_pred_cat) + 1e-9))
-                                            
-                                            resultados_cat.append({
-                                                'Categoría': categoria,
-                                                'Modelo': modelo,
-                                                'MAE': mae_cat,
-                                                'RMSE': rmse_cat,
-                                                'MAPE (%)': mape_cat,
-                                                'SMAPE (%)': smape_cat
-                                            })
-                                    
-                                except Exception as e:
-                                    st.warning(f"Categoría {categoria}, {modelo} omitido: {e}")
-                            
-                            forecasts_cat_dict[categoria] = categoria_forecasts
-                    
-                    # Mostrar resultados
-                    if resultados_cat:
-                        st.subheader("📊 Comparación de métricas por categoría")
-                        df_resultados_cat = pd.DataFrame(resultados_cat)
-                        st.dataframe(df_resultados_cat.round(2).sort_values(['Categoría', 'RMSE']))
-                        
-                        # Gráfico comparativo
-                        st.subheader("📈 Comparativa de pronósticos por categoría")
-                        
-                        # Seleccionar modelo para comparar
-                        modelos_disponibles_cat = list(set([r['Modelo'] for r in resultados_cat]))
-                        modelo_comparar = st.selectbox("Selecciona modelo para comparar categorías:", 
-                                                    modelos_disponibles_cat, key='modelo_comparar_cat')
-                        
-                        fig_cat = go.Figure()
-                        
-                        # Colores para categorías
-                        colors = px.colors.qualitative.Set3
-                        
-                        for i, categoria in enumerate(categorias_seleccionadas):
-                            if categoria in forecasts_cat_dict and modelo_comparar in forecasts_cat_dict[categoria]:
-                                data_cat = forecasts_cat_dict[categoria][modelo_comparar]
-                                color = colors[i % len(colors)]
-                                
-                                # Serie histórica
-                                ts_cat_plot = ts_categorias.loc[categoria]
-                                fig_cat.add_trace(go.Scatter(
-                                    x=ts_cat_plot.index, 
-                                    y=ts_cat_plot.values, 
-                                    mode='lines+markers', 
-                                    name=f'{categoria} (hist)',
-                                    line=dict(color=color, width=2)
-                                ))
-                                
-                                # Pronóstico histórico
-                                if data_cat['hist'] is not None:
-                                    fig_cat.add_trace(go.Scatter(
-                                        x=data_cat['hist'].index, 
-                                        y=data_cat['hist'].values, 
-                                        mode='lines', 
-                                        name=f'{categoria} ({modelo_comparar} hist)',
-                                        line=dict(color=color, dash='dot')
-                                    ))
-                                
-                                # Pronóstico futuro
-                                fig_cat.add_trace(go.Scatter(
-                                    x=data_cat['future'].index, 
-                                    y=data_cat['future'].values, 
-                                    mode='lines+markers', 
-                                    name=f'{categoria} ({modelo_comparar} futuro)',
-                                    line=dict(color=color, width=3)
-                                ))
-                        
-                        fig_cat.update_layout(
-                            hovermode='x unified', 
-                            xaxis_title='Fecha', 
-                            yaxis_title=columna_forecast_cat,
-                            title=f'Pronósticos por categoría - {modelo_comparar}'
-                        )
-                        st.plotly_chart(fig_cat, use_container_width=True)
-                        
-                        # Descarga de resultados por categorías
-                        st.subheader("📥 Descargar resultados por categorías")
-                        buffer_cat = io.BytesIO()
-                        with zipfile.ZipFile(buffer_cat, 'w') as zf:
-                            # Métricas por categoría
-                            zf.writestr("metricas_por_categoria.csv", df_resultados_cat.round(2).to_csv(index=False))
-                            
-                            # Pronósticos por categoría
-                            for categoria in categorias_seleccionadas:
-                                if categoria in forecasts_cat_dict:
-                                    for modelo in forecasts_cat_dict[categoria]:
-                                        data_cat = forecasts_cat_dict[categoria][modelo]
-                                        forecast_df = pd.DataFrame({
-                                            'Periodo': data_cat['future'].index,
-                                            'Pronostico': data_cat['future'].values
-                                        })
-                                        zf.writestr(f"forecast_{categoria}_{modelo}.csv", forecast_df.to_csv(index=False))
-                        
-                        st.download_button(
-                            "📊 Descargar pronósticos por categorías (ZIP)", 
-                            data=buffer_cat.getvalue(),
-                            file_name="forecasts_por_categorias.zip", 
-                            mime="application/zip"
-                        )
+            # --- Análisis alternativo si no hay suficientes datos ---
+            st.warning(f"""
+            ⚠️ La serie solo tiene {len(ts)} observaciones, 
+            pero se requieren al menos {2*periodo_estacionalidad} para descomponer.
+            Se mostrará un análisis simplificado.
+            """)
+
+            # Rolling mean (suavizado de tendencia)
+            rolling = ts.rolling(window=3, center=True).mean()
+            st.line_chart(pd.DataFrame({
+                "Demanda": ts, 
+                "Tendencia suavizada (3 periodos)": rolling
+            }))
+
+            # Autocorrelación (ACF)
+            from statsmodels.tsa.stattools import acf
+
+            # Definir rango máximo de rezagos según frecuencia
+            default_lag = 10
+            if resample_freq == "MS":
+                max_lag_default = min(12, len(ts)-1)  # hasta 12 meses
+            else:  # Semanal
+                max_lag_default = min(52, len(ts)-1)  # hasta 52 semanas
+
+            # Slider interactivo para seleccionar número de rezagos
+            max_lag = st.slider(
+                "Número máximo de rezagos para ACF",
+                min_value=5,
+                max_value=max_lag_default,
+                value=default_lag
+            )
+
+            lag_acf = acf(ts, nlags=max_lag)
+
+            acf_df = pd.DataFrame({
+                "Rezago": list(range(len(lag_acf))),
+                "Autocorrelación": lag_acf
+            })
+            st.bar_chart(acf_df.set_index("Rezago"))
+
+            # Interpretación simple de la tendencia
+            st.markdown("### 🔍 Interpretación simplificada")
+            if rolling.dropna().iloc[-1] > rolling.dropna().iloc[0]:
+                st.success("🔼 La demanda parece **creciente** según el suavizado.")
+            elif rolling.dropna().iloc[-1] < rolling.dropna().iloc[0]:
+                st.error("🔽 La demanda parece **decreciente** según el suavizado.")
             else:
-                st.info("Selecciona al menos una categoría para hacer pronósticos.")
+                st.info("⏸ La demanda parece **estable** en el tiempo analizado.")
+
+            # Identificar rezagos significativos en ACF
+            significativos = [lag for lag, val in enumerate(lag_acf[1:], start=1) if abs(val) > 0.3]
+
+            if significativos:
+                if resample_freq == "MS":
+                    detalle = ", ".join([f"{lag} mes(es)" for lag in significativos])
+                else:  # Semanal
+                    detalle = ", ".join([f"{lag} semana(s)" for lag in significativos])
+
+                st.success(f"📈 Se detectan correlaciones en los rezagos: **{detalle}**. "
+                        "Esto sugiere una posible **estacionalidad** en esos intervalos.")
+            else:
+                st.info("📉 No se observa evidencia fuerte de estacionalidad en los rezagos analizados.")
+                
+    with st.expander("📊 Análisis por Familia", expanded=False):
+        st.header("📊 Análisis por Familia")
+        st.markdown("Analiza la demanda, rotaciones y ventas agrupadas por familia de productos.")
+
+        # Agrupación por Familia
+        familia_agg = base.groupby('Familia').agg(
+            Ventas=('Monto', 'sum'),
+            Unidades=('Unidades', 'sum'),
+            Cajas=('Cajas_vendidas', 'sum'),
+            Volumen=('Volumen_m3', 'sum'),
+            Rotacion_Sem=('Cajas_vendidas', lambda x: x.sum() / weeks_range),
+            Rotacion_Mes=('Cajas_vendidas', lambda x: x.sum() / months_range),
+            Rotacion_Anual=('Cajas_vendidas', lambda x: x.sum() / years_range)
+        ).reset_index()
+
+        # Calcular porcentajes
+        total_ventas = familia_agg['Ventas'].sum()
+        familia_agg['% Ventas'] = (familia_agg['Ventas'] / total_ventas * 100).round(2)
+
+        # Mostrar tabla
+        st.dataframe(familia_agg)
+
+        # Gráfico de contribución por familia
+        fig_familia = px.pie(
+            familia_agg,
+            values='% Ventas',
+            names='Familia',
+            title="Contribución de Ventas por Familia"
+        )
+        st.plotly_chart(fig_familia, use_container_width=True)
+    
+    with st.expander("📊 Análisis por País", expanded=False):
+        st.header("📊 Análisis por País")
+        st.markdown("Analiza la demanda y ventas agrupadas por país (manteniendo anonimato).")
+
+        # Crear columna TipoPais
         
+        base['TipoPais'] = base['NumPais'].apply(lambda x: 'Nacional' if x == '01' else 'Exportación')
+
+        # Agrupación por país
+        pais_agg = base.groupby('NumPais').agg(
+            Ventas=('Monto', 'sum'),
+            Unidades=('Unidades', 'sum'),
+            Cajas=('Cajas_vendidas', 'sum'),
+            Volumen=('Volumen_m3', 'sum')
+        ).reset_index()
+
+        # Calcular porcentajes
+        total_ventas = pais_agg['Ventas'].sum()
+        pais_agg['% Ventas'] = (pais_agg['Ventas'] / total_ventas * 100).round(2)
+
+        # Mostrar tabla
+        st.dataframe(pais_agg)
+
+        # Gráfico de contribución por país
+        fig_pais = px.pie(
+            pais_agg,
+            names='NumPais',
+            values='% Ventas',
+            title="Contribución de Ventas por País",
+        )
+        st.plotly_chart(fig_pais, use_container_width=True)
+
+               
     with st.expander("📊 Análisis de Contribución por Categorías ABC", expanded=False):
-        # -------------------------------
-        # Análisis de Contribución por Categorías
-        # -------------------------------
         st.header('📊 Análisis de Contribución por Categorías ABC')
-        
         st.markdown("""
         Esta sección proporciona un análisis detallado de la contribución de cada categoría ABC 
-        al total de ventas, volumen y popularidad, útil para entender el impacto de cada categoría.
+        al total de ventas, volumen, popularidad, unidades y cajas, útil para entender el impacto de cada categoría.
         """)
-        
-        # Análisis de contribución
+
+        # --- Agrupar y calcular métricas ---
         contribucion_categorias = by_item.groupby('Clase_SuperABC').agg({
             'ventas': 'sum',
-            'volumen': 'sum', 
+            'volumen': 'sum',
             'popularidad': 'sum',
-            'unidades': 'sum'
+            'Unidades': 'sum',
+            'Cajas': 'sum',
+            'Rot_Unidades_Sem': 'mean',
+            'Rot_Unidades_Mes': 'mean',
+            'Rot_Unidades_Año': 'mean',
+            'Rot_Cajas_Sem': 'mean',
+            'Rot_Cajas_Mes': 'mean',
+            'Rot_Cajas_Año': 'mean'
         }).round(2)
-        
-        # Agregar conteo de artículos (usando el índice)
+
+        # Conteo de artículos
         contribucion_categorias['Cantidad_Articulos'] = by_item.groupby('Clase_SuperABC').size()
-        
-        # Calcular porcentajes
+
+        # Totales para porcentajes
         total_ventas = contribucion_categorias['ventas'].sum()
         total_volumen = contribucion_categorias['volumen'].sum()
         total_popularidad = contribucion_categorias['popularidad'].sum()
-        total_unidades = contribucion_categorias['unidades'].sum()
+        total_unidades = contribucion_categorias['Unidades'].sum()
+        total_cajas = contribucion_categorias['Cajas'].sum()
         total_articulos = contribucion_categorias['Cantidad_Articulos'].sum()
-        
-        contribucion_categorias['% Ventas'] = (contribucion_categorias['ventas'] / total_ventas * 100).round(2)
-        contribucion_categorias['% Volumen'] = (contribucion_categorias['volumen'] / total_volumen * 100).round(2)
-        contribucion_categorias['% Popularidad'] = (contribucion_categorias['popularidad'] / total_popularidad * 100).round(2)
-        contribucion_categorias['% Unidades'] = (contribucion_categorias['unidades'] / total_unidades * 100).round(2)
-        contribucion_categorias['% Artículos'] = (contribucion_categorias['Cantidad_Articulos'] / total_articulos * 100).round(2)
-        
+
+        # Calcular porcentajes
+        contribucion_categorias['% Ventas'] = (contribucion_categorias['ventas']/total_ventas*100).round(2)
+        contribucion_categorias['% Volumen'] = (contribucion_categorias['volumen']/total_volumen*100).round(2)
+        contribucion_categorias['% Popularidad'] = (contribucion_categorias['popularidad']/total_popularidad*100).round(2)
+        contribucion_categorias['% Unidades'] = (contribucion_categorias['Unidades']/total_unidades*100).round(2)
+        contribucion_categorias['% Cajas'] = (contribucion_categorias['Cajas']/total_cajas*100).round(2)
+        contribucion_categorias['% Artículos'] = (contribucion_categorias['Cantidad_Articulos']/total_articulos*100).round(2)
+
         # Renombrar columnas
-        contribucion_categorias.columns = ['Ventas', 'Volumen', 'Popularidad', 'Unidades', 'Cantidad Artículos', 
-                                         '% Ventas', '% Volumen', '% Popularidad', '% Unidades', '% Artículos']
-        
+        contribucion_categorias.rename(columns={
+            'ventas':'Ventas',
+            'volumen':'Volumen',
+            'popularidad':'Popularidad',
+            'Unidades':'Unidades',
+            'Cajas':'Cajas',
+            'Rot_Unidades_Sem':'Rotación Semanal (uds)',
+            'Rot_Unidades_Mes':'Rotación Mensual (uds)',
+            'Rot_Unidades_Año':'Rotación Anual (uds)',
+            'Rot_Cajas_Sem':'Rotación Semanal (cajas)',
+            'Rot_Cajas_Mes':'Rotación Mensual (cajas)',
+            'Rot_Cajas_Año':'Rotación Anual (cajas)'
+        }, inplace=True)
+
         st.subheader("📈 Tabla de Contribución por Categorías")
         st.dataframe(contribucion_categorias)
-        
-        # Gráficos de contribución
+
+        # --- Gráficos de contribución (ventas y volumen) ---
+        import plotly.express as px
         col1, col2 = st.columns(2)
-        
         with col1:
             st.subheader("🥧 Contribución de Ventas por Categoría")
             fig_ventas = px.pie(
-                values=contribucion_categorias['% Ventas'], 
+                contribucion_categorias,
+                values='% Ventas',
                 names=contribucion_categorias.index,
                 title="Distribución de Ventas por Categoría ABC"
             )
             st.plotly_chart(fig_ventas, use_container_width=True)
-        
+
         with col2:
             st.subheader("🥧 Contribución de Volumen por Categoría")
             fig_volumen = px.pie(
-                values=contribucion_categorias['% Volumen'], 
+                contribucion_categorias,
+                values='% Volumen',
                 names=contribucion_categorias.index,
                 title="Distribución de Volumen por Categoría ABC"
             )
             st.plotly_chart(fig_volumen, use_container_width=True)
-        
-        # Gráfico de barras comparativo
-        st.subheader("📊 Comparación de Contribuciones")
-        
-        # Preparar datos para gráfico de barras
-        contrib_data = contribucion_categorias[['% Ventas', '% Volumen', '% Popularidad', '% Unidades']].reset_index()
-        contrib_data_melted = contrib_data.melt(
-            id_vars=['Clase_SuperABC'], 
-            value_vars=['% Ventas', '% Volumen', '% Popularidad', '% Unidades'],
-            var_name='Métrica', 
-            value_name='Porcentaje'
-        )
-        
+
+        # --- Gráficos de rotación ---
+        st.subheader("🥧 Distribución de Rotación por Categoría")
+        periodos = ['Semanal','Mensual','Anual']
+        tipos = ['uds','cajas']
+
+        for tipo in tipos:
+            for periodo in periodos:
+                col_name = f'Rotación {periodo} ({tipo})'
+                if col_name in contribucion_categorias.columns:
+                    fig = px.pie(
+                        contribucion_categorias,
+                        values=col_name,
+                        names=contribucion_categorias.index,
+                        title=f"Distribución de Rotación {periodo} ({tipo})"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+        # --- Gráfico de barras comparativo ---
+        st.subheader("📊 Comparación de Contribuciones por Métricas")
+        contrib_data_melted = contribucion_categorias[[
+            '% Ventas','% Volumen','% Popularidad','% Unidades','% Cajas'
+        ]].reset_index().melt(id_vars=['Clase_SuperABC'], 
+                            var_name='Métrica', value_name='Porcentaje')
+
         fig_barras = px.bar(
-            contrib_data_melted, 
-            x='Clase_SuperABC', 
-            y='Porcentaje', 
+            contrib_data_melted,
+            x='Clase_SuperABC',
+            y='Porcentaje',
             color='Métrica',
-            title="Comparación de Contribuciones por Categoría ABC",
-            barmode='group'
+            barmode='group',
+            title="Comparación de Contribuciones por Categoría ABC"
         )
         fig_barras.update_layout(xaxis_title="Categoría ABC", yaxis_title="Porcentaje (%)")
         st.plotly_chart(fig_barras, use_container_width=True)
-        
-        # Análisis de concentración (Pareto por categorías)
-        st.subheader("📈 Análisis de Concentración (Pareto)")
-        
-        # Ordenar por ventas
-        pareto_categorias = contribucion_categorias.sort_values('% Ventas', ascending=False)
-        pareto_categorias['Ventas_Acumuladas'] = pareto_categorias['% Ventas'].cumsum()
-        pareto_categorias['Categorias_Acumuladas'] = range(1, len(pareto_categorias) + 1)
-        pareto_categorias['% Categorias'] = (pareto_categorias['Categorias_Acumuladas'] / len(pareto_categorias) * 100).round(2)
-        
-        # Gráfico de Pareto
-        fig_pareto_cat = go.Figure()
-        
-        # Barras de ventas
-        fig_pareto_cat.add_trace(go.Bar(
-            x=pareto_categorias.index,
-            y=pareto_categorias['% Ventas'],
-            name='% Ventas',
-            marker_color='lightblue'
-        ))
-        
-        # Línea de acumulado
-        fig_pareto_cat.add_trace(go.Scatter(
-            x=pareto_categorias.index,
-            y=pareto_categorias['Ventas_Acumuladas'],
-            mode='lines+markers',
-            name='% Ventas Acumulado',
-            yaxis='y2',
-            line=dict(color='red', width=3)
-        ))
-        
-        fig_pareto_cat.update_layout(
-            title="Análisis de Pareto - Concentración de Ventas por Categorías ABC",
-            xaxis_title="Categorías ABC (ordenadas por ventas)",
-            yaxis=dict(title="% Ventas", side="left"),
-            yaxis2=dict(title="% Ventas Acumulado", side="right", overlaying="y"),
-            hovermode='x unified'
-        )
-        
-        st.plotly_chart(fig_pareto_cat, use_container_width=True)
-        
-        # Mostrar tabla de Pareto
-        st.subheader("📋 Tabla de Análisis de Pareto")
-        pareto_display = pareto_categorias[['% Ventas', 'Ventas_Acumuladas', '% Categorias']].copy()
-        pareto_display.columns = ['% Ventas', '% Ventas Acumulado', '% Categorías']
-        st.dataframe(pareto_display)
-        
-        # Insights automáticos
+
+        # --- Insights automáticos ---
         st.subheader("💡 Insights Automáticos")
-        
-        # Categoría con mayor contribución
-        top_categoria = pareto_categorias.index[0]
-        top_ventas = pareto_categorias.iloc[0]['% Ventas']
-        
-        # Categorías que representan el 80% de las ventas
-        categorias_80 = pareto_categorias[pareto_categorias['Ventas_Acumuladas'] <= 80]
-        num_categorias_80 = len(categorias_80)
-        
-        # Categorías con baja contribución
-        categorias_bajas = pareto_categorias[pareto_categorias['% Ventas'] < 5]
-        
         insights = []
-        insights.append(f"🎯 **Categoría líder**: {top_categoria} representa el {top_ventas}% de las ventas")
-        insights.append(f"📊 **Concentración**: {num_categorias_80} categorías representan el 80% de las ventas")
-        insights.append(f"📉 **Categorías de baja contribución**: {len(categorias_bajas)} categorías contribuyen menos del 5% cada una")
-        
+
+        # Ventas y concentración
+        top_categoria = contribucion_categorias['% Ventas'].idxmax()
+        top_ventas = contribucion_categorias.loc[top_categoria,'% Ventas']
+        insights.append(f"🎯 **Categoría líder:** {top_categoria} representa {top_ventas}% de las ventas totales")
+
+        categorias_80 = contribucion_categorias[contribucion_categorias['% Ventas'].cumsum() <= 80]
+        insights.append(f"📊 **Concentración 80/20:** {len(categorias_80)} categorías concentran 80% de las ventas")
+
+        categorias_bajas = contribucion_categorias[contribucion_categorias['% Ventas'] < 5]
         if len(categorias_bajas) > 0:
-            insights.append(f"🔍 **Categorías a revisar**: {', '.join(categorias_bajas.index)}")
-        
+            insights.append(f"📉 **Baja contribución:** {len(categorias_bajas)} categorías <5% de ventas")
+            insights.append(f"🔍 **Revisar categorías:** {', '.join(categorias_bajas.index)}")
+
+        # Top rotaciones
+        for tipo in tipos:
+            for periodo in periodos:
+                col_name = f'Rotación {periodo} ({tipo})'
+                if col_name in contribucion_categorias.columns:
+                    top_rot = contribucion_categorias.sort_values(col_name, ascending=False).head(3)
+                    insights.append(f"⚡ **Mayor rotación {periodo} ({tipo}):** {', '.join(top_rot.index)}")
+
         for insight in insights:
             st.info(insight)
+
 
     with st.expander("🏭 Sugerencias de Distribución de Bodega", expanded=False):
         # -------------------------------
@@ -1545,76 +1462,78 @@ if 'by_item' in st.session_state:
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("📦 Dimensiones de Pallets")
-                largo_pallet = st.number_input("Largo del pallet (pies)", min_value=0.1, value=4.0, step=0.1)
-                ancho_pallet = st.number_input("Ancho del pallet (pies)", min_value=0.1, value=4.0, step=0.1)
-                alto_pallet = st.number_input("Alto del pallet (pies)", min_value=0.1, value=5.0, step=0.1)
+                st.subheader("📦 Dimensiones de Pallets (metros)")
+                largo_pallet = st.number_input("Largo del pallet (m)", min_value=0.1, value=1.2, step=0.01)
+                ancho_pallet = st.number_input("Ancho del pallet (m)", min_value=0.1, value=1.0, step=0.01)
+                alto_pallet = st.number_input("Alto del pallet (m)", min_value=0.1, value=1.5, step=0.01)
                 factor_llenado = st.number_input("Factor de llenado (%)", min_value=0.1, max_value=100.0, value=85.0, step=1.0) / 100.0
-                
-                st.subheader("🏗️ Dimensiones de Bay")
-                largo_bay = st.number_input("Largo de Bay (pies)", min_value=0.1, value=8.0, step=0.1)
-                profundidad_bay = st.number_input("Profundidad del Bay (pies)", min_value=0.1, value=4.0, step=0.1)
+
+                st.subheader("🏗️ Dimensiones de Bay (metros)")
+                largo_bay = st.number_input("Largo de Bay (m)", min_value=0.1, value=2.5, step=0.01)
+                profundidad_bay = st.number_input("Profundidad del Bay (m)", min_value=0.1, value=1.2, step=0.01)
                 niveles = st.number_input("Niveles", min_value=1, value=5, step=1)
                 
             with col2:
                 st.subheader("🏢 Información de Rack")
                 bays_por_rack = st.number_input("Bays por rack", min_value=1, value=10, step=1)
-                
-                st.subheader("🏭 Dimensiones de Bodega")
-                ancho_bodega = st.number_input("Ancho de bodega (pies)", min_value=0.1, value=100.0, step=1.0)
-                largo_bodega = st.number_input("Largo de bodega (pies)", min_value=0.1, value=200.0, step=1.0)
+
+                st.subheader("🏭 Dimensiones de Bodega (metros)")
+                ancho_bodega = st.number_input("Ancho de bodega (m)", min_value=0.1, value=30.0, step=0.01)
+                largo_bodega = st.number_input("Largo de bodega (m)", min_value=0.1, value=60.0, step=0.01)
                 porcentaje_almacenamiento = st.number_input("Porcentaje para almacenamiento (%)", min_value=1.0, max_value=100.0, value=70.0, step=1.0) / 100.0
-                ancho_pasillo = st.number_input("Ancho de pasillo (pies)", min_value=0.1, value=12.0, step=0.1)
+                ancho_pasillo = st.number_input("Ancho de pasillo (m)", min_value=0.1, value=3.6, step=0.01)
             
             # Botón para calcular distribución
             if st.button("🧮 Calcular Distribución de Bodega"):
+                
                 # -------------------------------
-                # Cálculos de Capacidad
+                # Cálculos de Capacidad en metros
                 # -------------------------------
                 st.subheader("📊 Cálculos de Capacidad")
-                
-                # Volumen de pallet
+
+                # Volumen de pallet (m³)
                 volumen_pallet = largo_pallet * ancho_pallet * alto_pallet * factor_llenado
-                
+
                 # Pallets por nivel
                 pallets_por_nivel = int((largo_bay // largo_pallet) * (profundidad_bay // ancho_pallet))
-                
-                # Área de bay
+
+                # Área de bay (m²)
                 area_bay = largo_bay * profundidad_bay
-                
-                # Área de rack
+
+                # Área de rack (m²)
                 area_rack = area_bay * bays_por_rack
-                
-                # Área de bodega
+
+                # Área de bodega total (m²)
                 area_bodega_total = ancho_bodega * largo_bodega
-                
-                # Área efectiva de almacenamiento (basada en porcentaje)
+
+                # Área efectiva de almacenamiento (m²)
                 area_efectiva_almacenamiento = area_bodega_total * porcentaje_almacenamiento
-                
-                # Área de pasillo
+
+                # Área de pasillo (m²)
                 area_pasillo = largo_bay * ancho_pasillo * bays_por_rack
-                
-                # Área de rack + pasillo
+
+                # Área de rack + pasillo (m²)
                 area_rack_pasillo = area_rack + area_pasillo
-                
+
                 # Pallets por rack
                 pallets_por_rack = pallets_por_nivel * niveles * bays_por_rack
+                
                 
                 # Mostrar cálculos
                 calculos_df = pd.DataFrame({
                     'Métrica': [
-                        'Volumen de pallet (pies³)',
+                        'Volumen de pallet (m³)',
                         'Pallets por nivel',
-                        'Área de bay (pies²)',
-                        'Área de rack (pies²)',
-                        'Área de bodega (pies²)',
-                        f'Área efectiva de almacenamiento (pies²) - {porcentaje_almacenamiento*100:.0f}%',
-                        'Área de pasillo (pies²)',
-                        'Área de rack + pasillo (pies²)',
+                        'Área de bay (m²)',
+                        'Área de rack (m²)',
+                        'Área de bodega (m²)',
+                        f'Área efectiva de almacenamiento (m²) - {porcentaje_almacenamiento*100:.0f}%',
+                        'Área de pasillo (m²)',
+                        'Área de rack + pasillo (m²)',
                         'Pallets por rack'
                     ],
                     'Valor': [
-                        round(volumen_pallet, 2),
+                        round(volumen_pallet, 3),
                         pallets_por_nivel,
                         round(area_bay, 2),
                         round(area_rack, 2),
@@ -1625,8 +1544,8 @@ if 'by_item' in st.session_state:
                         pallets_por_rack
                     ]
                 })
-                
                 st.dataframe(calculos_df, use_container_width=True)
+
                 
                 # -------------------------------
                 # Tabla previa de preparación (solicitada)
@@ -1635,8 +1554,8 @@ if 'by_item' in st.session_state:
                 base_pre = base.copy()
                 base_pre['MesyAño'] = base_pre['Fecha'].dt.to_period('M').astype(str)
                 # Volumen por unidad: cuidar divisiones por 0
-                base_pre['Volumen por unidad'] = (base_pre['Volumen_p3'] / base_pre['Unidades'].replace(0, np.nan)).fillna(0)
-                tabla_previa = base_pre[['NumDoc','Articulo','Unidades','Cajas_vendidas','Unidades_por_caja','Fecha','Volumen_p3','MesyAño','Volumen por unidad']].copy()
+                base_pre['Volumen por unidad'] = (base_pre['Volumen_m3'] / base_pre['Unidades'].replace(0, np.nan)).fillna(0)
+                tabla_previa = base_pre[['NumDoc','Articulo','Unidades','Cajas_vendidas','Unidades_por_caja','Fecha','Volumen_m3','MesyAño','Volumen por unidad']].copy()
                 tabla_previa.columns = ['Num. Doc','Artículo','Unid. Vend','Cajas vend.','Cant x caja','Fecha Doc','Volumen total (p3)','MesyAño','Volumen por unidad']
                 st.dataframe(tabla_previa, use_container_width=True)
 
@@ -1683,7 +1602,7 @@ if 'by_item' in st.session_state:
                 # 2) Cálculos por SKU: totales y estadísticas de demanda
                 totales = base.groupby('Articulo').agg(
                     unidades_totales=('Unidades','sum'),
-                    volumen_total=('Volumen_p3','sum')
+                    volumen_total=('Volumen_m3','sum')
                 )
                 vol_por_unidad = (totales['volumen_total'] / totales['unidades_totales'].replace(0, np.nan)).fillna(0)
 
@@ -1728,19 +1647,19 @@ if 'by_item' in st.session_state:
                 sku_df['Z'] = z_vals.round(2)
                 sku_df['ss'] = ss_vals.round(2)
                 sku_df['Inventario máximo'] = inv_max.round(2)
-                sku_df['Volumen por unidad'] = vol_por_unidad.reindex(skus_con_abc.index).fillna(0).round(4)
-                sku_df['Volumen Total (unidades)'] = vol_total_unidades.round(2)
+                sku_df['Volumen por unidad (m³)'] = vol_por_unidad.reindex(skus_con_abc.index).fillna(0).round(4)
+                sku_df['Volumen Total (unidades, m³)'] = vol_total_unidades.round(2)
                 sku_df['Unidades por caja'] = upc_por_sku.reindex(skus_con_abc.index).fillna(1).astype(int)
                 sku_df['Cantidad de cajas'] = cant_cajas.astype(int)
-                sku_df['Volumen por caja'] = vol_por_caja.round(4)
-                sku_df['Volumen Total (cajas)'] = vol_total_cajas.round(2)
+                sku_df['Volumen por caja (m³)'] = vol_por_caja.round(4)
+                sku_df['Volumen Total (cajas, m³)'] = vol_total_cajas.round(2)
 
                 st.dataframe(sku_df.reset_index(), use_container_width=True)
 
                 # Totales generales previos a demanda: sumar meses, Total general y Volumen Total (cajas)
                 totales_previos = {
                     'Total general (unidades)': float(sku_df['Total general'].sum()),
-                    'Volumen Total (cajas)': float(sku_df['Volumen Total (cajas)'].sum())
+                    'Volumen Total (cajas, m³)': float(sku_df['Volumen Total (cajas, m³)'].sum())
                 }
                 st.write('Totales generales:', {k: round(v, 2) for k, v in totales_previos.items()})
                 
@@ -1750,7 +1669,7 @@ if 'by_item' in st.session_state:
                 st.subheader("📊 Volúmenes por Categoría ABC")
                 
                 # Agregar volúmenes por categoría (sku_df ya está filtrado por ABC válido)
-                vol_por_categoria = sku_df.groupby('ABC')['Volumen Total (cajas)'].sum().sort_index()
+                vol_por_categoria = sku_df.groupby('ABC')['Volumen Total (cajas, m³)'].sum().sort_index()
                 vol_total_general = vol_por_categoria.sum()
                 
                 tabla_volumenes = pd.DataFrame({
@@ -1781,11 +1700,11 @@ if 'by_item' in st.session_state:
                 st.subheader("🏗️ Cálculo de Racks Necesarios")
                 
                 # Crear tabla de racks por categoría usando los volúmenes ya calculados
-                racks_categorias = pd.DataFrame({'VolumenTotal_ft3': vol_por_categoria})
+                racks_categorias = pd.DataFrame({'VolumenTotal_m3': vol_por_categoria})
                 racks_categorias.index.name = 'Clase_SuperABC'
                 
                 # Cálculos paso a paso 
-                racks_categorias['Pallets_Necesarios'] = np.ceil(racks_categorias['VolumenTotal_ft3'] / volumen_pallet)
+                racks_categorias['Pallets_Necesarios'] = np.ceil(racks_categorias['VolumenTotal_m3'] / volumen_pallet)
                 racks_categorias['Equivalente_en_Niveles'] = racks_categorias['Pallets_Necesarios'] / pallets_por_nivel
                 racks_categorias['Equivalente_en_Bays'] = racks_categorias['Equivalente_en_Niveles'] / niveles
                 racks_categorias['Equivalente_en_Racks'] = racks_categorias['Equivalente_en_Bays'] / bays_por_rack
@@ -1802,7 +1721,7 @@ if 'by_item' in st.session_state:
                     sobrante_pct = 100 - racks_categorias['Distribucion_de_Racks_%'].sum()
                     if sobrante_pct > 0:
                         sobrante_row = pd.DataFrame({
-                            'VolumenTotal_ft3': [0],
+                            'VolumenTotal_m3': [0],
                             'Pallets_Necesarios': [0],
                             'Equivalente_en_Niveles': [0],
                             'Equivalente_en_Bays': [0],
@@ -1827,7 +1746,7 @@ if 'by_item' in st.session_state:
                 resumen_df = pd.DataFrame({
                     'Métrica': [
                         'Racks necesarios total',
-                        'Área en uso (pies²)',
+                        'Área en uso (m²)',
                         'Utilización de espacio (%)'
                     ],
                     'Valor': [
@@ -1888,8 +1807,11 @@ with st.expander("📊 Descargar Resultados Completos", expanded=False):
                     hoja_nombres = []
 
                     for key, df in st.session_state.items():
-                        if key.startswith("perfil_") and isinstance(df, pd.DataFrame):
+                        if key.startswith("perfil_") or key == "perfil_by_item":
                             hoja = key.replace("perfil_", "")[:30]  # hoja ≤ 31 chars
+                            # ✅ Si el DataFrame tiene índice con nombre, lo pasamos a columna
+                            if df.index.name is not None:
+                                df = df.reset_index()
                             df.to_excel(writer, sheet_name=hoja, index=False)
                             hoja_nombres.append((hoja, df))
 
@@ -2236,7 +2158,7 @@ with st.expander("📄 Reportes PDF", expanded=False):
                 # Cubicaje por orden
                 # -------------------------------
 
-                cubic_per_order = base.groupby('NumDoc').agg(volumen_total=('Volumen_p3','sum')).reset_index()
+                cubic_per_order = base.groupby('NumDoc').agg(volumen_total=('Volumen_m3','sum')).reset_index()
                 vol_bins = [-1,1,2,5,10,20,50,1e9]
                 vol_labels = ['≤1','1-2','2-5','5-10','10-20','20-50','>50']
                 cubic_per_order['vol_bin'] = pd.cut(cubic_per_order['volumen_total'], bins=vol_bins, labels=vol_labels)
@@ -2261,7 +2183,7 @@ with st.expander("📄 Reportes PDF", expanded=False):
                 # Recalcular lv y dist_incremento para el PDF
                 lv = base.groupby('NumDoc').agg(
                     lineas=('Articulo','nunique'),
-                    volumen_total=('Volumen_p3','sum')
+                    volumen_total=('Volumen_m3','sum')
                 ).reset_index()
 
                 VOLUMEN_TARIMA = st.session_state.get('vol_tarima', 42.38)
@@ -2313,7 +2235,7 @@ with st.expander("📄 Reportes PDF", expanded=False):
                 add_fig(fig4, 'Órdenes por día de la semana')
 
                 days_intro = """
-                Este muestra cómo se distribuyen los pedidos a lo largo de la semana y su porcentaje sobre el total. 
+                Este perfil muestra cómo se distribuyen los pedidos a lo largo de la semana y su porcentaje sobre el total. 
                 Permite planificar personal, turnos y recursos logísticos en función de los picos y valles de demanda, identificando qué días presentan mayor ingreso de órdenes.
                 """
                 elems.append(Paragraph(days_intro, styles['Normal']))
@@ -2325,7 +2247,7 @@ with st.expander("📄 Reportes PDF", expanded=False):
 
                 lv = base.groupby('NumDoc').agg(
                     lineas=('Articulo','nunique'),
-                    volumen_total=('Volumen_p3','sum')
+                    volumen_total=('Volumen_m3','sum')
                 ).reset_index()
 
                 # Definir rangos (misma lógica que en Streamlit)
@@ -2442,3 +2364,371 @@ with st.expander("📄 Reportes PDF", expanded=False):
         st.warning("Habilita 'Generar informe PDF' en la configuración del sidebar para usar esta función.")
 
 st.success('Cálculos finalizados. Ajusta cortes y vuelve a calcular según necesites.')
+
+# =============================
+# WMS y posiciones del almacén
+# =============================
+st.header('WMS y Posiciones del Almacén')
+
+# Inicializar variables en session_state si no existen
+if 'posiciones_filtradas' not in st.session_state:
+    st.session_state['posiciones_filtradas'] = pd.DataFrame()
+if 'registro_movimientos' not in st.session_state:
+    st.session_state['registro_movimientos'] = pd.DataFrame(columns=[
+        "Tipo", "Artículo", "Camas", "Cajas", "Rack Origen", "Cuerpo Origen", "Nivel Origen", "Posición Origen",
+        "Rack Destino", "Cuerpo Destino", "Nivel Destino", "Posición Destino"
+    ])
+
+# =============================
+# Carga del archivo de posiciones
+# =============================
+uploaded_positions = st.file_uploader("Cargar archivo de posiciones del almacén", type=["xlsx"])
+if uploaded_positions:
+    xls = pd.ExcelFile(uploaded_positions)
+    hojas = xls.sheet_names
+    hoja_seleccionada = st.selectbox("Selecciona la hoja a cargar", hojas)
+    
+    if hoja_seleccionada:
+        columnas_necesarias = ['Rack', 'Cuerpo', 'Nivel', 'Posición', 'Zona', 'Artículo', 'Camas', 'Cajas']
+        posiciones = pd.read_excel(uploaded_positions, sheet_name=hoja_seleccionada, usecols=columnas_necesarias)
+        st.success(f"Hoja '{hoja_seleccionada}' cargada correctamente")
+
+        # Limpieza básica
+        posiciones['Artículo'] = posiciones['Artículo'].astype(str).str.strip().str.upper()
+        posiciones['Nivel'] = pd.to_numeric(posiciones['Nivel'], errors='coerce').fillna(0).astype(int)
+        posiciones['Posición'] = posiciones['Posición'].astype(str).fillna('')
+        
+        # Separar múltiples SKUs por fila
+        posiciones['Artículos_lista'] = posiciones['Artículo'].str.split(' - ')
+
+        # Filtrar racks y niveles relevantes
+        posiciones_filtradas = posiciones[
+            ((posiciones['Rack'] == 1) & (posiciones['Nivel'].isin([1,2,3,4,5]))) |
+            ((posiciones['Rack'] == 2) & (posiciones['Nivel'].isin([1,2,3,4,5])))
+        ].copy()
+        
+        st.session_state['posiciones_filtradas'] = posiciones_filtradas
+        st.write("Posiciones del almacén:")
+        st.dataframe(posiciones_filtradas)
+
+# =============================
+# Verificar correspondencia con Súper ABC
+# =============================
+if 'by_item' in st.session_state and not st.session_state['posiciones_filtradas'].empty:
+    by_item = st.session_state['by_item']
+    posiciones_filtradas = st.session_state['posiciones_filtradas']
+
+    articulos_posiciones = set([sku for sublist in posiciones_filtradas['Artículos_lista'] for sku in sublist])
+    articulos_by_item = set(by_item.index)
+    articulos_faltantes = articulos_posiciones - articulos_by_item - {"", "VACÍO"}
+    if articulos_faltantes:
+        st.warning(f"⚠️ Los siguientes artículos en posiciones no están en el Súper ABC: {articulos_faltantes}")
+    else:
+        st.success("✅ Todos los artículos en posiciones tienen correspondencia en el Súper ABC.")
+
+# =============================
+# Función para determinar zona por SKU
+# =============================
+zonas_prioridad = {'Oro': 3, 'Plata': 2, 'Bronce': 1, 'MP': 0}
+
+def zona_ideal_sku(sku):
+    sku = sku.strip().upper()
+    if sku in ["", "VACÍO"]:
+        return None  # vacíos no se consideran
+    if sku in by_item.index:
+        zona = by_item.loc[sku, 'Zona_Bodega']
+        return zona if pd.notna(zona) else 'Bronce'
+    return 'MP'
+
+def zona_prioritaria_fila(articulos):
+    """
+    Determina la zona prioritaria de una fila (tarima) con múltiples SKUs,
+    ignorando vacíos. Retorna None si todos son vacíos.
+    """
+    skus = [sku.strip().upper() for sku in articulos if sku.strip().upper() not in ["", "VACÍO"]]
+    if not skus:
+        return None
+    zonas = [zona_ideal_sku(sku) for sku in skus if zona_ideal_sku(sku) is not None]
+    if not zonas:
+        return None
+    zonas_sorted = sorted(zonas, key=lambda z: zonas_prioridad.get(z,0), reverse=True)
+    return zonas_sorted[0]
+
+# =============================
+# Reubicación automática de tarimas
+# =============================
+if not st.session_state['posiciones_filtradas'].empty:
+    posiciones_filtradas = st.session_state['posiciones_filtradas'].copy()
+    posiciones_filtradas['Zona_Ideal_Fila'] = posiciones_filtradas['Artículos_lista'].apply(zona_prioritaria_fila)
+
+    # Filas mal ubicadas (ignorando vacíos)
+    mal_ubicadas = posiciones_filtradas[
+        (posiciones_filtradas['Zona'] != posiciones_filtradas['Zona_Ideal_Fila']) &
+        (posiciones_filtradas['Zona_Ideal_Fila'].notna())
+    ].copy()
+
+    if not mal_ubicadas.empty:
+        mal_ubicadas['Ubicación_Actual'] = mal_ubicadas.apply(
+            lambda r: f"Rack {r['Rack']}, Cuerpo {r['Cuerpo']}, Nivel {r['Nivel']}, Posición {r['Posición']}", axis=1
+        )
+        st.subheader("📊 Filas mal ubicadas")
+        st.dataframe(mal_ubicadas[['Artículos_lista','Zona','Zona_Ideal_Fila','Ubicación_Actual']])
+        # -----------------------------
+        # Gráfica de filas mal ubicadas por zona (excluyendo MP)
+        # -----------------------------
+        # Filtrar MP y contar por la zona actual
+        conteo_zonas = mal_ubicadas[mal_ubicadas['Zona'] != 'MP']['Zona'].value_counts().reindex(['Oro','Plata','Bronce'], fill_value=0).reset_index()
+        conteo_zonas.columns = ['Zona', 'Filas Mal Ubicadas']
+
+        # Colores fijos
+        colores = {'Oro': '#FFD700', 'Plata': '#C0C0C0', 'Bronce': '#CD7F32'}
+
+        fig = px.bar(
+            conteo_zonas,
+            x='Zona',
+            y='Filas Mal Ubicadas',
+            color='Zona',
+            color_discrete_map=colores,
+            text='Filas Mal Ubicadas',
+            title="Filas mal ubicadas por Zona (Oro, Plata, Bronce)"
+        )
+        fig.update_layout(showlegend=False)
+        st.plotly_chart(fig)
+
+        posiciones_reconfiguradas = posiciones_filtradas.copy()
+
+        for idx, fila in mal_ubicadas.iterrows():
+            zona_objetivo = fila['Zona_Ideal_Fila']
+
+            # Buscar slots vacíos en la zona objetivo (priorizar niveles bajos y cuerpos cercanos)
+            vacios = posiciones_reconfiguradas[
+                (posiciones_reconfiguradas['Artículo'].str.upper().isin(["", "VACÍO"])) &
+                (posiciones_reconfiguradas['Zona'] == zona_objetivo)
+            ].sort_values(by=['Nivel', 'Cuerpo', 'Rack', 'Posición'])
+
+            if not vacios.empty:
+                slot = vacios.iloc[0]
+                # Mover tarima completa
+                posiciones_reconfiguradas.loc[slot.name, ['Artículo','Camas','Cajas']] = \
+                    [fila['Artículo'], fila['Camas'], fila['Cajas']]
+                posiciones_reconfiguradas.loc[idx, ['Artículo','Camas','Cajas']] = ["VACÍO", np.nan, np.nan]
+            else:
+                # fallback a zonas de menor prioridad (también priorizando niveles bajos)
+                prioridad_actual = zonas_prioridad[zona_objetivo]
+                for z, p in sorted(zonas_prioridad.items(), key=lambda x: -x[1]):
+                    if p < prioridad_actual:
+                        vacios_alt = posiciones_reconfiguradas[
+                            (posiciones_reconfiguradas['Artículo'].str.upper().isin(["", "VACÍO"])) &
+                            (posiciones_reconfiguradas['Zona'] == z)
+                        ].sort_values(by=['Nivel', 'Cuerpo', 'Rack', 'Posición'])
+                        if not vacios_alt.empty:
+                            slot = vacios_alt.iloc[0]
+                            posiciones_reconfiguradas.loc[slot.name, ['Artículo','Camas','Cajas']] = \
+                                [fila['Artículo'], fila['Camas'], fila['Cajas']]
+                            posiciones_reconfiguradas.loc[idx, ['Artículo','Camas','Cajas']] = ["VACÍO", np.nan, np.nan]
+                            break
+
+        st.subheader("🔄 Reubicación recomendada")
+        st.dataframe(posiciones_reconfiguradas)
+
+        # =============================
+        # Sección para descarga de resultados
+        # =============================
+        from io import BytesIO
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            posiciones_reconfiguradas.to_excel(writer, index=False, sheet_name='Posiciones')
+
+        output.seek(0)  # mover el cursor al inicio del archivo
+
+        st.download_button(
+            label="📥 Descargar posiciones reconfiguradas",
+            data=output,
+            file_name='posiciones_reconfiguradas.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+
+    import pandas as pd
+    from openpyxl import load_workbook
+
+    def guardar_configuracion_y_movimientos(posiciones, movimientos, archivo_salida="almacen_actualizado.xlsx"):
+        """
+        Guarda la configuración actual del almacén y los movimientos realizados en un archivo Excel.
+
+        Args:
+            posiciones (pd.DataFrame): DataFrame con la configuración actual del almacén.
+            movimientos (pd.DataFrame): DataFrame con el registro de movimientos realizados.
+            archivo_salida (str): Nombre del archivo Excel de salida.
+
+        Returns:
+            str: Ruta del archivo Excel generado.
+        """
+        with pd.ExcelWriter(archivo_salida, engine="openpyxl") as writer:
+            # Guardar la configuración actual del almacén
+            posiciones.to_excel(writer, sheet_name="Configuración Actual", index=False)
+
+            # Guardar el registro de movimientos
+            movimientos.to_excel(writer, sheet_name="Registro de Movimientos", index=False)
+
+        return archivo_salida
+
+    # Registro de movimientos
+    st.subheader("📋 Registro de Movimientos")
+
+    # Selección del tipo de movimiento
+    tipo_movimiento = st.selectbox("Tipo de movimiento", ["Ingreso", "Salida", "Traslado"])
+
+    # Datos comunes para todos los movimientos
+    articulo = st.text_input("Código del artículo")
+    camas = st.number_input("Camas", min_value=0, step=1)
+    cajas = st.number_input("Cajas", min_value=0, step=1)
+
+    # Crear un DataFrame para registrar los movimientos
+    if "registro_movimientos" not in st.session_state:
+        st.session_state["registro_movimientos"] = pd.DataFrame(columns=[
+            "Tipo", "Artículo", "Camas", "Cajas", "Rack Origen", "Cuerpo Origen", "Nivel Origen", "Posición Origen",
+            "Rack Destino", "Cuerpo Destino", "Nivel Destino", "Posición Destino"
+        ])
+
+    registro_movimientos = st.session_state["registro_movimientos"]
+
+    if tipo_movimiento == "Ingreso":
+        # Mostrar ubicaciones sugeridas antes de registrar el ingreso
+        if articulo in by_item.index:
+            prioridad_actual = by_item.loc[articulo, 'Clase_SuperABC']
+            zona_prioridad = map_zone(prioridad_actual)
+
+            # Filtrar posiciones disponibles según la zona de prioridad
+            disponibles = posiciones_filtradas[posiciones_filtradas['Artículo'].isna()]
+            if zona_prioridad == 'Oro':
+                sugerencias = disponibles[
+                    (disponibles['Rack'] == 1) &
+                    (disponibles['Cuerpo'].isin([1, 2])) &
+                    (disponibles['Nivel'].isin([1, 2]))
+                ]
+            elif zona_prioridad == 'Plata':
+                sugerencias = disponibles[
+                    (disponibles['Cuerpo'].isin([3, 4, 5])) &
+                    (disponibles['Nivel'].isin([1, 2]))
+                ]
+            else:  # Bronce
+                sugerencias = disponibles[
+                    (disponibles['Nivel'] == 3)
+                ]
+
+            if sugerencias.empty:
+                st.warning(f"No se encontraron ubicaciones disponibles para el artículo '{articulo}' en la zona {zona_prioridad}.")
+            else:
+                st.write(f"📍 Ubicaciones sugeridas para el artículo '{articulo}' (Zona: {zona_prioridad}):")
+                st.dataframe(sugerencias.head(5))  # Mostrar las primeras 5 sugerencias
+
+        # Datos específicos para ingreso
+        rack = st.number_input("Rack (destino)", min_value=1, step=1)
+        cuerpo = st.number_input("Cuerpo (destino)", min_value=1, step=1)
+        nivel = st.number_input("Nivel (destino)", min_value=1, max_value=5, step=1)
+        posicion = st.text_input("Posición (destino, ej. I1, C1, D1)")
+
+        if st.button("Registrar Ingreso"):
+            # Verificar si la ubicación está disponible
+            ubicacion_disponible = posiciones_filtradas[
+                (posiciones_filtradas['Rack'] == rack) &
+                (posiciones_filtradas['Cuerpo'] == cuerpo) &
+                (posiciones_filtradas['Nivel'] == nivel) &
+                (posiciones_filtradas['Posición'] == posicion) &
+                (posiciones_filtradas['Artículo'].isna())
+            ]
+
+            if not ubicacion_disponible.empty:
+                st.success(f"Ingreso registrado: {articulo} - Rack {rack}, Cuerpo {cuerpo}, Nivel {nivel}, Posición {posicion}, Camas {camas}, Cajas {cajas}")
+                # Actualizar la ubicación en el DataFrame
+                posiciones_filtradas.loc[
+                    (posiciones_filtradas['Rack'] == rack) &
+                    (posiciones_filtradas['Cuerpo'] == cuerpo) &
+                    (posiciones_filtradas['Nivel'] == nivel) &
+                    (posiciones_filtradas['Posición'] == posicion),
+                    ['Artículo', 'Camas', 'Cajas']
+                ] = [articulo, camas, cajas]
+
+                # Registrar el movimiento
+                nuevo_movimiento = pd.DataFrame([{
+                    "Tipo": "Ingreso",
+                    "Artículo": articulo,
+                    "Camas": camas,
+                    "Cajas": cajas,
+                    "Rack Origen": None,
+                    "Cuerpo Origen": None,
+                    "Nivel Origen": None,
+                    "Posición Origen": None,
+                    "Rack Destino": rack,
+                    "Cuerpo Destino": cuerpo,
+                    "Nivel Destino": nivel,
+                    "Posición Destino": posicion
+                }])
+
+                registro_movimientos = pd.concat([registro_movimientos, nuevo_movimiento], ignore_index=True)
+                st.session_state["registro_movimientos"] = registro_movimientos
+
+                # Guardar la configuración y los movimientos en un archivo Excel
+                archivo_actualizado = guardar_configuracion_y_movimientos(posiciones_filtradas, registro_movimientos)
+                st.success("Archivo actualizado con el movimiento registrado.")
+                with open(archivo_actualizado, "rb") as file:
+                    st.download_button(
+                        label="📥 Descargar archivo actualizado",
+                        data=file,
+                        file_name=archivo_actualizado,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+            else:
+                st.error("La ubicación seleccionada no está disponible. Por favor, selecciona una de las ubicaciones sugeridas.")
+
+    import json
+
+    def guardar_estado_json():
+        """
+        Guarda el estado completo de la aplicación en un archivo JSON.
+        """
+        estado = {
+            "posiciones_filtradas": posiciones_filtradas.to_dict() if 'posiciones_filtradas' in locals() else None,
+            "registro_movimientos": registro_movimientos.to_dict() if 'registro_movimientos' in locals() else None,
+            "criterios_seleccionados": st.session_state.get("criterios_seleccionados", []),
+            "cortes_abc": st.session_state.get("cortes_abc", {}),
+            "by_item": st.session_state.get("by_item", {}).to_dict() if "by_item" in st.session_state else None,
+            "ubicaciones_clasificacion": st.session_state.get("ubicaciones_clasificacion", {}).to_dict() if "ubicaciones_clasificacion" in st.session_state else None
+        }
+        with open("estado_app.json", "w") as f:
+            json.dump(estado, f)
+        st.success("Estado guardado correctamente.")
+
+    def cargar_estado_json():
+        """
+        Carga el estado completo de la aplicación desde un archivo JSON.
+        """
+        global posiciones_filtradas, registro_movimientos
+        try:
+            with open("estado_app.json", "r") as f:
+                estado = json.load(f)
+            
+            # Restaurar los datos en las variables globales y session_state
+            if estado.get("posiciones_filtradas"):
+                posiciones_filtradas = pd.DataFrame.from_dict(estado["posiciones_filtradas"])
+            if estado.get("registro_movimientos"):
+                registro_movimientos = pd.DataFrame.from_dict(estado["registro_movimientos"])
+            st.session_state["criterios_seleccionados"] = estado.get("criterios_seleccionados", [])
+            st.session_state["cortes_abc"] = estado.get("cortes_abc", {})
+            if estado.get("by_item"):
+                st.session_state["by_item"] = pd.DataFrame.from_dict(estado["by_item"])
+            if estado.get("ubicaciones_clasificacion"):
+                st.session_state["ubicaciones_clasificacion"] = pd.DataFrame.from_dict(estado["ubicaciones_clasificacion"])
+            
+            st.success("Estado cargado correctamente.")
+        except FileNotFoundError:
+            st.warning("No se encontró un archivo de estado previo. Inicia desde cero.")
+        except Exception as e:
+            st.error(f"Error al cargar el estado: {e}")
+
+if st.button("Cargar estado previo"):
+    cargar_estado_json()
+
+if st.button("Guardar estado actual"):
+    guardar_estado_json()
